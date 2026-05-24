@@ -250,15 +250,25 @@ function Inner() {
                   <TableCell>
                     <StatusBadge status={b.status} />
                   </TableCell>
-                  <TableCell>
-                    {(b.status === "pending" || b.status === "confirmed") && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => cancelM.mutate(b.slot_id)}
-                      >
-                        Huỷ
-                      </Button>
+                  <TableCell className="space-x-2">
+                    {(b.status === "pending" || b.status === "confirmed") &&
+                      new Date(b.session_date) > new Date() && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => cancelM.mutate(b.slot_id)}
+                        >
+                          Huỷ
+                        </Button>
+                      )}
+                    {b.teacher_id &&
+                      new Date(b.session_date) <= new Date() &&
+                      (b.status === "confirmed" || b.status === "pending") &&
+                      !ratedSlots.has(b.slot_id) && (
+                        <RatingDialog slotId={b.slot_id} teacherId={b.teacher_id} />
+                      )}
+                    {ratedSlots.has(b.slot_id) && (
+                      <span className="text-xs text-success">Đã đánh giá</span>
                     )}
                   </TableCell>
                 </TableRow>
