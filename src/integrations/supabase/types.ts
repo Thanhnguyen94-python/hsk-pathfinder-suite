@@ -14,6 +14,83 @@ export type Database = {
   }
   public: {
     Tables: {
+      assignment_submissions: {
+        Row: {
+          assignment_id: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          reviewer_comment: string | null
+          score: number | null
+          student_id: string
+          submission_id: string
+          submission_text: string | null
+          submission_url: string | null
+          submitted_at: string
+        }
+        Insert: {
+          assignment_id: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          reviewer_comment?: string | null
+          score?: number | null
+          student_id: string
+          submission_id?: string
+          submission_text?: string | null
+          submission_url?: string | null
+          submitted_at?: string
+        }
+        Update: {
+          assignment_id?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          reviewer_comment?: string | null
+          score?: number | null
+          student_id?: string
+          submission_id?: string
+          submission_text?: string | null
+          submission_url?: string | null
+          submitted_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "assignment_submissions_assignment_id_fkey"
+            columns: ["assignment_id"]
+            isOneToOne: false
+            referencedRelation: "assignments"
+            referencedColumns: ["assignment_id"]
+          },
+        ]
+      }
+      assignments: {
+        Row: {
+          assignment_id: string
+          course_id: string
+          created_at: string
+          created_by: string | null
+          deadline: string
+          description: string | null
+          title: string
+        }
+        Insert: {
+          assignment_id?: string
+          course_id: string
+          created_at?: string
+          created_by?: string | null
+          deadline: string
+          description?: string | null
+          title: string
+        }
+        Update: {
+          assignment_id?: string
+          course_id?: string
+          created_at?: string
+          created_by?: string | null
+          deadline?: string
+          description?: string | null
+          title?: string
+        }
+        Relationships: []
+      }
       audit_logs: {
         Row: {
           action: string
@@ -186,6 +263,39 @@ export type Database = {
         }
         Relationships: []
       }
+      hsk_chapters: {
+        Row: {
+          chapter_id: string
+          content: string | null
+          course_id: string
+          created_at: string
+          order_index: number
+          pdf_url: string | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          chapter_id?: string
+          content?: string | null
+          course_id: string
+          created_at?: string
+          order_index?: number
+          pdf_url?: string | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          chapter_id?: string
+          content?: string | null
+          course_id?: string
+          created_at?: string
+          order_index?: number
+          pdf_url?: string | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       student_progress: {
         Row: {
           course_id: string
@@ -276,6 +386,36 @@ export type Database = {
           },
         ]
       }
+      teacher_ratings: {
+        Row: {
+          comment: string | null
+          created_at: string
+          rating_id: string
+          slot_id: string
+          stars: number
+          student_id: string
+          teacher_id: string
+        }
+        Insert: {
+          comment?: string | null
+          created_at?: string
+          rating_id?: string
+          slot_id: string
+          stars: number
+          student_id: string
+          teacher_id: string
+        }
+        Update: {
+          comment?: string | null
+          created_at?: string
+          rating_id?: string
+          slot_id?: string
+          stars?: number
+          student_id?: string
+          teacher_id?: string
+        }
+        Relationships: []
+      }
       users: {
         Row: {
           created_at: string
@@ -365,6 +505,25 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      get_teacher_analytics: {
+        Args: never
+        Returns: {
+          avg_stars: number
+          full_name: string
+          teacher_id: string
+          total_penalties: number
+          total_reviews: number
+        }[]
+      }
+      get_top_teachers: {
+        Args: { p_limit?: number }
+        Returns: {
+          avg_stars: number
+          full_name: string
+          teacher_id: string
+          total_reviews: number
+        }[]
       }
       is_admin: { Args: never; Returns: boolean }
       log_action: {
