@@ -19,13 +19,13 @@ export function SiteHeader() {
           <a href="#notices" className="transition-colors hover:text-foreground">Bảng tin</a>
           <a href="#login" className="transition-colors hover:text-foreground">Đăng nhập</a>
         </nav>
-        <a
-          href="#login"
+        <Link
+          to="/auth"
           className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
         >
           <Languages className="h-4 w-4" />
           Vào hệ thống
-        </a>
+        </Link>
       </div>
     </header>
   );
