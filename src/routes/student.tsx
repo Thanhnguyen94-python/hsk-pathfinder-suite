@@ -284,9 +284,106 @@ function Inner() {
           </Table>
         </div>
       </section>
+
+      <section>
+        <h2 className="mb-3 font-display text-lg font-semibold">Bài tập HSK</h2>
+        <div className="rounded-xl border border-border bg-card">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Khoá</TableHead>
+                <TableHead>Tiêu đề</TableHead>
+                <TableHead>Hạn nộp</TableHead>
+                <TableHead>Bài nộp / điểm</TableHead>
+                <TableHead></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(assignmentsQ.data ?? []).map((a: any) => {
+                const sub = (submissionsQ.data ?? []).find(
+                  (s: any) => s.assignment_id === a.assignment_id,
+                );
+                return (
+                  <AssignmentRow
+                    key={a.assignment_id}
+                    assignment={a}
+                    submission={sub}
+                    onSubmit={(text) =>
+                      submitM.mutate({ assignmentId: a.assignment_id, text })
+                    }
+                  />
+                );
+              })}
+              {(assignmentsQ.data ?? []).length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center text-muted-foreground">
+                    Chưa có bài tập nào
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </section>
     </div>
   );
 }
+
+function AssignmentRow({
+  assignment,
+  submission,
+  onSubmit,
+}: {
+  assignment: any;
+  submission: any;
+  onSubmit: (text: string) => void;
+}) {
+  const [text, setText] = useState(submission?.submission_text ?? "");
+  return (
+    <TableRow>
+      <TableCell className="font-mono text-xs">{assignment.course_id}</TableCell>
+      <TableCell>
+        <div className="font-medium">{assignment.title}</div>
+        {assignment.description && (
+          <div className="text-xs text-muted-foreground line-clamp-1">
+            {assignment.description}
+          </div>
+        )}
+      </TableCell>
+      <TableCell className="whitespace-nowrap text-xs">
+        {new Date(assignment.deadline).toLocaleString()}
+      </TableCell>
+      <TableCell className="text-xs">
+        {submission ? (
+          <span>
+            Đã nộp · điểm:{" "}
+            <span className="font-semibold">{submission.score ?? "—"}</span>
+            {submission.reviewer_comment && (
+              <div className="text-muted-foreground">
+                {submission.reviewer_comment}
+              </div>
+            )}
+          </span>
+        ) : (
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Nội dung bài làm…"
+            className="h-9 w-full rounded-md border border-input bg-background px-2"
+          />
+        )}
+      </TableCell>
+      <TableCell>
+        {!submission && (
+          <Button size="sm" disabled={!text} onClick={() => onSubmit(text)}>
+            Nộp
+          </Button>
+        )}
+      </TableCell>
+    </TableRow>
+  );
+}
+
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
