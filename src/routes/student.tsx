@@ -62,6 +62,27 @@ function Inner() {
 
   const meQ = useQuery({ queryKey: ["me"], queryFn: () => me() });
   const dashQ = useQuery({ queryKey: ["student-dash"], queryFn: () => dash() });
+  const ratingsFn = useServerFn(getMyRatings);
+  const ratingsQ = useQuery({ queryKey: ["my-ratings"], queryFn: () => ratingsFn() });
+  const assignmentsFn = useServerFn(listAssignments);
+  const submissionsFn = useServerFn(listSubmissions);
+  const submitFn = useServerFn(submitAssignment);
+  const assignmentsQ = useQuery({
+    queryKey: ["assignments"],
+    queryFn: () => assignmentsFn(),
+  });
+  const submissionsQ = useQuery({
+    queryKey: ["my-submissions"],
+    queryFn: () => submissionsFn(),
+  });
+  const submitM = useMutation({
+    mutationFn: (v: { assignmentId: string; text: string }) =>
+      submitFn({ data: { assignmentId: v.assignmentId, text: v.text } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["my-submissions"] }),
+  });
+  const ratedSlots = new Set(
+    (ratingsQ.data ?? []).map((r: any) => r.slot_id),
+  );
 
   const refresh = () =>
     qc.invalidateQueries({ queryKey: ["student-dash"] });
