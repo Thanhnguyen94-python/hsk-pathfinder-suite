@@ -32,6 +32,7 @@ function Index() {
       <main className="flex-1">
         <Hero />
         <Features />
+        <TopTeachers />
         <NoticeBoard />
         <LoginPortal />
       </main>
