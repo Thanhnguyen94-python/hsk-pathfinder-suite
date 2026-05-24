@@ -3,6 +3,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { DashboardShell } from "@/components/site/DashboardShell";
+import { RatingDialog } from "@/components/site/RatingDialog";
 import {
   getStudentDashboard,
   studentCancelBooking,
@@ -11,6 +12,10 @@ import {
   expireStaleFreezes,
   createBooking,
   getMe,
+  getMyRatings,
+  listAssignments,
+  listSubmissions,
+  submitAssignment,
 } from "@/lib/hsk.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
