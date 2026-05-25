@@ -507,3 +507,76 @@ export const gradeSubmission = createServerFn({ method: "POST" })
     return row;
   });
 
+
+// ---------- Recurring bookings ----------
+
+export const createRecurringBookings = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        classId: z.string().min(1).max(50),
+        courseId: z.string().min(1).max(50),
+        startDate: z.string(), // YYYY-MM-DD
+        endDate: z.string(),
+        startTime: z.string().regex(/^\d{2}:\d{2}$/),
+        endTime: z.string().regex(/^\d{2}:\d{2}$/),
+        weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: row, error } = await context.supabase.rpc("create_recurring_bookings", {
+      p_class_id: data.classId,
+      p_course_id: data.courseId,
+      p_start_date: data.startDate,
+      p_end_date: data.endDate,
+      p_start_time: data.startTime + ":00",
+      p_end_time: data.endTime + ":00",
+      p_weekdays: data.weekdays,
+    });
+    if (error) throw new Error(error.message);
+    const r = Array.isArray(row) ? row[0] : row;
+    return {
+      created: r?.created ?? 0,
+      skipped: r?.skipped ?? 0,
+      slotIds: r?.slot_ids ?? [],
+    };
+  });
+
+// ---------- Customer Care directory ----------
+
+export const getCareStudents = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data, error } = await context.supabase.rpc("get_care_students");
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  });
+
+export const getCareStaff = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data, error } = await context.supabase.rpc("get_care_staff");
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  });
+
+export const revealUserPii = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        specificId: z.string().min(1).max(50),
+        field: z.enum(["phone", "birth_year"]),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: value, error } = await context.supabase.rpc("reveal_user_pii", {
+      p_specific_id: data.specificId,
+      p_field: data.field,
+    });
+    if (error) throw new Error(error.message);
+    return { value: value ?? null };
+  });
