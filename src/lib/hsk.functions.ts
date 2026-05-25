@@ -187,7 +187,7 @@ export const getTeacherDashboard = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { supabase } = context;
-    const [pending, mine, penalties] = await Promise.all([
+    const [pending, mine, penalties, users] = await Promise.all([
       supabase
         .from("bookings")
         .select("*")
@@ -202,16 +202,23 @@ export const getTeacherDashboard = createServerFn({ method: "GET" })
         .from("teacher_penalties")
         .select("*")
         .order("created_at", { ascending: false }),
+      supabase.from("users").select("specific_id, full_name"),
     ]);
     if (pending.error) throw new Error(pending.error.message);
     if (mine.error) throw new Error(mine.error.message);
     if (penalties.error) throw new Error(penalties.error.message);
+    const nameMap = new Map((users.data ?? []).map((u: any) => [u.specific_id, u.full_name]));
+    const enrich = (b: any) => ({
+      ...b,
+      student_name: nameMap.get(b.student_id) ?? null,
+    });
     return {
-      pendingSlots: pending.data ?? [],
-      myBookings: mine.data ?? [],
+      pendingSlots: (pending.data ?? []).map(enrich),
+      myBookings: (mine.data ?? []).map(enrich),
       penalties: penalties.data ?? [],
     };
   });
+
 
 // ---------- Ratings ----------
 
