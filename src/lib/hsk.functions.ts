@@ -161,18 +161,27 @@ export const getStudentDashboard = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { supabase } = context;
-    const [progress, bookings] = await Promise.all([
+    const [progress, bookings, users] = await Promise.all([
       supabase.from("student_progress").select("*"),
       supabase
         .from("bookings")
         .select("*")
         .order("session_date", { ascending: true })
         .limit(50),
+      supabase.from("users").select("specific_id, full_name"),
     ]);
     if (progress.error) throw new Error(progress.error.message);
     if (bookings.error) throw new Error(bookings.error.message);
-    return { progress: progress.data ?? [], bookings: bookings.data ?? [] };
+    const nameMap = new Map((users.data ?? []).map((u: any) => [u.specific_id, u.full_name]));
+    return {
+      progress: progress.data ?? [],
+      bookings: (bookings.data ?? []).map((b: any) => ({
+        ...b,
+        teacher_name: b.teacher_id ? nameMap.get(b.teacher_id) ?? null : null,
+      })),
+    };
   });
+
 
 export const getTeacherDashboard = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
