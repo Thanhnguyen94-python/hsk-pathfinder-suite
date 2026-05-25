@@ -109,7 +109,10 @@ function Inner() {
                 .map((b: any) => (
                   <TableRow key={b.slot_id}>
                     <TableCell className="font-mono text-xs">{b.slot_id}</TableCell>
-                    <TableCell>{b.student_id}</TableCell>
+                    <TableCell>
+                      <div className="font-medium">{b.student_name ?? "—"}</div>
+                      <div className="font-mono text-xs text-muted-foreground">{b.student_id}</div>
+                    </TableCell>
                     <TableCell>{new Date(b.session_date).toLocaleString()}</TableCell>
                     <TableCell>{b.status}</TableCell>
                     <TableCell>
@@ -123,6 +126,7 @@ function Inner() {
                     </TableCell>
                   </TableRow>
                 ))}
+
             </TableBody>
           </Table>
         </div>
