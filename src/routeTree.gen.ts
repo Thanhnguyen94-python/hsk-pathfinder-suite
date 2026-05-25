@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as TeacherRouteImport } from './routes/teacher'
 import { Route as StudentRouteImport } from './routes/student'
 import { Route as LogisticsRouteImport } from './routes/logistics'
+import { Route as CareRouteImport } from './routes/care'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
@@ -29,6 +30,11 @@ const StudentRoute = StudentRouteImport.update({
 const LogisticsRoute = LogisticsRouteImport.update({
   id: '/logistics',
   path: '/logistics',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CareRoute = CareRouteImport.update({
+  id: '/care',
+  path: '/care',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthRoute = AuthRouteImport.update({
@@ -51,6 +57,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
+  '/care': typeof CareRoute
   '/logistics': typeof LogisticsRoute
   '/student': typeof StudentRoute
   '/teacher': typeof TeacherRoute
@@ -59,6 +66,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
+  '/care': typeof CareRoute
   '/logistics': typeof LogisticsRoute
   '/student': typeof StudentRoute
   '/teacher': typeof TeacherRoute
@@ -68,20 +76,36 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
+  '/care': typeof CareRoute
   '/logistics': typeof LogisticsRoute
   '/student': typeof StudentRoute
   '/teacher': typeof TeacherRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin' | '/auth' | '/logistics' | '/student' | '/teacher'
+  fullPaths:
+    | '/'
+    | '/admin'
+    | '/auth'
+    | '/care'
+    | '/logistics'
+    | '/student'
+    | '/teacher'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin' | '/auth' | '/logistics' | '/student' | '/teacher'
+  to:
+    | '/'
+    | '/admin'
+    | '/auth'
+    | '/care'
+    | '/logistics'
+    | '/student'
+    | '/teacher'
   id:
     | '__root__'
     | '/'
     | '/admin'
     | '/auth'
+    | '/care'
     | '/logistics'
     | '/student'
     | '/teacher'
@@ -91,6 +115,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   AuthRoute: typeof AuthRoute
+  CareRoute: typeof CareRoute
   LogisticsRoute: typeof LogisticsRoute
   StudentRoute: typeof StudentRoute
   TeacherRoute: typeof TeacherRoute
@@ -117,6 +142,13 @@ declare module '@tanstack/react-router' {
       path: '/logistics'
       fullPath: '/logistics'
       preLoaderRoute: typeof LogisticsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/care': {
+      id: '/care'
+      path: '/care'
+      fullPath: '/care'
+      preLoaderRoute: typeof CareRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth': {
@@ -147,6 +179,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   AuthRoute: AuthRoute,
+  CareRoute: CareRoute,
   LogisticsRoute: LogisticsRoute,
   StudentRoute: StudentRoute,
   TeacherRoute: TeacherRoute,
@@ -154,13 +187,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}

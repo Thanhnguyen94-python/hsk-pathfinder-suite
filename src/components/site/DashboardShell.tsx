@@ -45,6 +45,12 @@ export function DashboardShell({
             <ArrowLeft className="h-4 w-4" /> Về trang chủ
           </Link>
           <div className="flex items-center gap-3">
+            <Link
+              to="/care"
+              className="text-sm text-muted-foreground hover:text-foreground"
+            >
+              CSKH
+            </Link>
             <span className={`rounded-md px-2.5 py-1 text-xs font-medium ${accent}`}>
               {role}
             </span>
@@ -52,6 +58,7 @@ export function DashboardShell({
               <LogOut className="mr-1.5 h-4 w-4" /> Đăng xuất
             </Button>
           </div>
+
         </div>
       </header>
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-10 sm:px-6 lg:px-8">

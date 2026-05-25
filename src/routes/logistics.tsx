@@ -374,7 +374,11 @@ function SubmissionsTab() {
             };
             return (
               <TableRow key={s.submission_id}>
-                <TableCell className="font-mono text-xs">{s.student_id}</TableCell>
+                <TableCell>
+                  <div className="font-medium">{s.student_name ?? "—"}</div>
+                  <div className="font-mono text-xs text-muted-foreground">{s.student_id}</div>
+                </TableCell>
+
                 <TableCell>
                   <div className="font-medium">{s.assignments?.title}</div>
                   <div className="text-xs text-muted-foreground">

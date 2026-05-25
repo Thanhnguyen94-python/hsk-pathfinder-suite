@@ -197,8 +197,14 @@ function TeachersTab() {
                 <TableCell className="whitespace-nowrap text-xs">
                   {new Date(r.created_at).toLocaleString()}
                 </TableCell>
-                <TableCell className="font-mono text-xs">{r.teacher_id}</TableCell>
-                <TableCell className="font-mono text-xs">{r.student_id}</TableCell>
+                <TableCell>
+                  <div className="font-medium">{r.teacher_name ?? "—"}</div>
+                  <div className="font-mono text-xs text-muted-foreground">{r.teacher_id}</div>
+                </TableCell>
+                <TableCell>
+                  <div className="font-medium">{r.student_name ?? "—"}</div>
+                  <div className="font-mono text-xs text-muted-foreground">{r.student_id}</div>
+                </TableCell>
                 <TableCell>
                   <div className="flex">
                     {[1, 2, 3, 4, 5].map((n) => (
@@ -213,6 +219,7 @@ function TeachersTab() {
                     ))}
                   </div>
                 </TableCell>
+
                 <TableCell className="max-w-md text-sm">{r.comment ?? "—"}</TableCell>
               </TableRow>
             ))}
@@ -285,9 +292,13 @@ function AuditTab() {
                 <TableCell className="whitespace-nowrap text-xs">
                   {new Date(l.created_at).toLocaleString()}
                 </TableCell>
-                <TableCell className="font-mono text-xs">
-                  {l.user_specific_id ?? l.user_id?.slice(0, 8) ?? "—"}
+                <TableCell>
+                  <div className="font-medium">{l.user_full_name ?? "—"}</div>
+                  <div className="font-mono text-xs text-muted-foreground">
+                    {l.user_specific_id ?? l.user_id?.slice(0, 8) ?? "—"}
+                  </div>
                 </TableCell>
+
                 <TableCell className="font-medium">{l.action}</TableCell>
                 <TableCell className="max-w-md font-mono text-[11px] text-muted-foreground">
                   <span className="line-clamp-2">

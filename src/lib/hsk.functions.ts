@@ -134,15 +134,23 @@ export const assignStudentToOfflineClass = createServerFn({ method: "POST" })
 export const getAuditLogs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    // RLS on audit_logs already restricts to admins; this returns [] otherwise.
-    const { data, error } = await context.supabase
-      .from("audit_logs")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(500);
-    if (error) throw new Error(error.message);
-    return data ?? [];
+    const { supabase } = context;
+    const [logs, users] = await Promise.all([
+      supabase
+        .from("audit_logs")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(500),
+      supabase.from("users").select("specific_id, full_name"),
+    ]);
+    if (logs.error) throw new Error(logs.error.message);
+    const nameMap = new Map((users.data ?? []).map((u: any) => [u.specific_id, u.full_name]));
+    return (logs.data ?? []).map((l: any) => ({
+      ...l,
+      user_full_name: l.user_specific_id ? nameMap.get(l.user_specific_id) ?? null : null,
+    }));
   });
+
 
 // ---------- Dashboard reads ----------
 
@@ -161,24 +169,33 @@ export const getStudentDashboard = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { supabase } = context;
-    const [progress, bookings] = await Promise.all([
+    const [progress, bookings, users] = await Promise.all([
       supabase.from("student_progress").select("*"),
       supabase
         .from("bookings")
         .select("*")
         .order("session_date", { ascending: true })
         .limit(50),
+      supabase.from("users").select("specific_id, full_name"),
     ]);
     if (progress.error) throw new Error(progress.error.message);
     if (bookings.error) throw new Error(bookings.error.message);
-    return { progress: progress.data ?? [], bookings: bookings.data ?? [] };
+    const nameMap = new Map((users.data ?? []).map((u: any) => [u.specific_id, u.full_name]));
+    return {
+      progress: progress.data ?? [],
+      bookings: (bookings.data ?? []).map((b: any) => ({
+        ...b,
+        teacher_name: b.teacher_id ? nameMap.get(b.teacher_id) ?? null : null,
+      })),
+    };
   });
+
 
 export const getTeacherDashboard = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { supabase } = context;
-    const [pending, mine, penalties] = await Promise.all([
+    const [pending, mine, penalties, users] = await Promise.all([
       supabase
         .from("bookings")
         .select("*")
@@ -193,16 +210,23 @@ export const getTeacherDashboard = createServerFn({ method: "GET" })
         .from("teacher_penalties")
         .select("*")
         .order("created_at", { ascending: false }),
+      supabase.from("users").select("specific_id, full_name"),
     ]);
     if (pending.error) throw new Error(pending.error.message);
     if (mine.error) throw new Error(mine.error.message);
     if (penalties.error) throw new Error(penalties.error.message);
+    const nameMap = new Map((users.data ?? []).map((u: any) => [u.specific_id, u.full_name]));
+    const enrich = (b: any) => ({
+      ...b,
+      student_name: nameMap.get(b.student_id) ?? null,
+    });
     return {
-      pendingSlots: pending.data ?? [],
-      myBookings: mine.data ?? [],
+      pendingSlots: (pending.data ?? []).map(enrich),
+      myBookings: (mine.data ?? []).map(enrich),
       penalties: penalties.data ?? [],
     };
   });
+
 
 // ---------- Ratings ----------
 
@@ -254,15 +278,28 @@ export const getMyRatings = createServerFn({ method: "GET" })
 export const getTeacherAnalytics = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase.rpc("get_teacher_analytics");
-    if (error) throw new Error(error.message);
-    const { data: ratings } = await context.supabase
-      .from("teacher_ratings")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(200);
-    return { teachers: data ?? [], ratings: ratings ?? [] };
+    const { supabase } = context;
+    const [analytics, ratings, users] = await Promise.all([
+      supabase.rpc("get_teacher_analytics"),
+      supabase
+        .from("teacher_ratings")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(200),
+      supabase.from("users").select("specific_id, full_name"),
+    ]);
+    if (analytics.error) throw new Error(analytics.error.message);
+    const nameMap = new Map((users.data ?? []).map((u: any) => [u.specific_id, u.full_name]));
+    return {
+      teachers: analytics.data ?? [],
+      ratings: (ratings.data ?? []).map((r: any) => ({
+        ...r,
+        teacher_name: nameMap.get(r.teacher_id) ?? null,
+        student_name: nameMap.get(r.student_id) ?? null,
+      })),
+    };
   });
+
 
 // ---------- Curriculum (HSK chapters) ----------
 
@@ -388,13 +425,22 @@ export const deleteAssignment = createServerFn({ method: "POST" })
 export const listSubmissions = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
-      .from("assignment_submissions")
-      .select("*, assignments(title, course_id, deadline)")
-      .order("submitted_at", { ascending: false });
-    if (error) throw new Error(error.message);
-    return data ?? [];
+    const { supabase } = context;
+    const [subs, users] = await Promise.all([
+      supabase
+        .from("assignment_submissions")
+        .select("*, assignments(title, course_id, deadline)")
+        .order("submitted_at", { ascending: false }),
+      supabase.from("users").select("specific_id, full_name"),
+    ]);
+    if (subs.error) throw new Error(subs.error.message);
+    const nameMap = new Map((users.data ?? []).map((u: any) => [u.specific_id, u.full_name]));
+    return (subs.data ?? []).map((s: any) => ({
+      ...s,
+      student_name: nameMap.get(s.student_id) ?? null,
+    }));
   });
+
 
 export const submitAssignment = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -461,3 +507,76 @@ export const gradeSubmission = createServerFn({ method: "POST" })
     return row;
   });
 
+
+// ---------- Recurring bookings ----------
+
+export const createRecurringBookings = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        classId: z.string().min(1).max(50),
+        courseId: z.string().min(1).max(50),
+        startDate: z.string(), // YYYY-MM-DD
+        endDate: z.string(),
+        startTime: z.string().regex(/^\d{2}:\d{2}$/),
+        endTime: z.string().regex(/^\d{2}:\d{2}$/),
+        weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: row, error } = await context.supabase.rpc("create_recurring_bookings", {
+      p_class_id: data.classId,
+      p_course_id: data.courseId,
+      p_start_date: data.startDate,
+      p_end_date: data.endDate,
+      p_start_time: data.startTime + ":00",
+      p_end_time: data.endTime + ":00",
+      p_weekdays: data.weekdays,
+    });
+    if (error) throw new Error(error.message);
+    const r = Array.isArray(row) ? row[0] : row;
+    return {
+      created: r?.created ?? 0,
+      skipped: r?.skipped ?? 0,
+      slotIds: r?.slot_ids ?? [],
+    };
+  });
+
+// ---------- Customer Care directory ----------
+
+export const getCareStudents = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data, error } = await context.supabase.rpc("get_care_students");
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  });
+
+export const getCareStaff = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data, error } = await context.supabase.rpc("get_care_staff");
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  });
+
+export const revealUserPii = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        specificId: z.string().min(1).max(50),
+        field: z.enum(["phone", "birth_year"]),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: value, error } = await context.supabase.rpc("reveal_user_pii", {
+      p_specific_id: data.specificId,
+      p_field: data.field,
+    });
+    if (error) throw new Error(error.message);
+    return { value: value ?? null };
+  });
