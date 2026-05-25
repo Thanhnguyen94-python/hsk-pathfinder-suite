@@ -278,15 +278,28 @@ export const getMyRatings = createServerFn({ method: "GET" })
 export const getTeacherAnalytics = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase.rpc("get_teacher_analytics");
-    if (error) throw new Error(error.message);
-    const { data: ratings } = await context.supabase
-      .from("teacher_ratings")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(200);
-    return { teachers: data ?? [], ratings: ratings ?? [] };
+    const { supabase } = context;
+    const [analytics, ratings, users] = await Promise.all([
+      supabase.rpc("get_teacher_analytics"),
+      supabase
+        .from("teacher_ratings")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(200),
+      supabase.from("users").select("specific_id, full_name"),
+    ]);
+    if (analytics.error) throw new Error(analytics.error.message);
+    const nameMap = new Map((users.data ?? []).map((u: any) => [u.specific_id, u.full_name]));
+    return {
+      teachers: analytics.data ?? [],
+      ratings: (ratings.data ?? []).map((r: any) => ({
+        ...r,
+        teacher_name: nameMap.get(r.teacher_id) ?? null,
+        student_name: nameMap.get(r.student_id) ?? null,
+      })),
+    };
   });
+
 
 // ---------- Curriculum (HSK chapters) ----------
 
