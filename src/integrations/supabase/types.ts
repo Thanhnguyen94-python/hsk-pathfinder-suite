@@ -123,6 +123,7 @@ export type Database = {
           class_id: string
           created_at: string
           session_date: string
+          session_end_date: string | null
           slot_id: string
           status: Database["public"]["Enums"]["booking_status"]
           student_id: string
@@ -132,6 +133,7 @@ export type Database = {
           class_id: string
           created_at?: string
           session_date: string
+          session_end_date?: string | null
           slot_id: string
           status?: Database["public"]["Enums"]["booking_status"]
           student_id: string
@@ -141,6 +143,7 @@ export type Database = {
           class_id?: string
           created_at?: string
           session_date?: string
+          session_end_date?: string | null
           slot_id?: string
           status?: Database["public"]["Enums"]["booking_status"]
           student_id?: string
@@ -303,6 +306,7 @@ export type Database = {
           expiry_date: string
           freeze_start_date: string | null
           id: string
+          learning_mode: string
           remaining_sessions: number
           status: Database["public"]["Enums"]["progress_status"]
           student_id: string
@@ -314,6 +318,7 @@ export type Database = {
           expiry_date?: string
           freeze_start_date?: string | null
           id?: string
+          learning_mode?: string
           remaining_sessions?: number
           status?: Database["public"]["Enums"]["progress_status"]
           student_id: string
@@ -325,6 +330,7 @@ export type Database = {
           expiry_date?: string
           freeze_start_date?: string | null
           id?: string
+          learning_mode?: string
           remaining_sessions?: number
           status?: Database["public"]["Enums"]["progress_status"]
           student_id?: string
@@ -418,28 +424,37 @@ export type Database = {
       }
       users: {
         Row: {
+          birth_year: number | null
           created_at: string
           email: string
           full_name: string
           id: string
+          phone: string | null
           role: Database["public"]["Enums"]["app_role"]
           specific_id: string
+          status: string
         }
         Insert: {
+          birth_year?: number | null
           created_at?: string
           email: string
           full_name: string
           id: string
+          phone?: string | null
           role?: Database["public"]["Enums"]["app_role"]
           specific_id: string
+          status?: string
         }
         Update: {
+          birth_year?: number | null
           created_at?: string
           email?: string
           full_name?: string
           id?: string
+          phone?: string | null
           role?: Database["public"]["Enums"]["app_role"]
           specific_id?: string
+          status?: string
         }
         Relationships: []
       }
@@ -468,6 +483,7 @@ export type Database = {
           class_id: string
           created_at: string
           session_date: string
+          session_end_date: string | null
           slot_id: string
           status: Database["public"]["Enums"]["booking_status"]
           student_id: string
@@ -479,6 +495,22 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      create_recurring_bookings: {
+        Args: {
+          p_class_id: string
+          p_course_id: string
+          p_end_date: string
+          p_end_time: string
+          p_start_date: string
+          p_start_time: string
+          p_weekdays: number[]
+        }
+        Returns: {
+          created: number
+          skipped: number
+          slot_ids: string[]
+        }[]
       }
       current_user_role: {
         Args: never
@@ -494,6 +526,7 @@ export type Database = {
           expiry_date: string
           freeze_start_date: string | null
           id: string
+          learning_mode: string
           remaining_sessions: number
           status: Database["public"]["Enums"]["progress_status"]
           student_id: string
@@ -505,6 +538,32 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      get_care_staff: {
+        Args: never
+        Returns: {
+          birth_year_masked: string
+          created_at: string
+          email: string
+          full_name: string
+          phone_masked: string
+          role: Database["public"]["Enums"]["app_role"]
+          specific_id: string
+          status: string
+        }[]
+      }
+      get_care_students: {
+        Args: never
+        Returns: {
+          birth_year_masked: string
+          courses: Json
+          created_at: string
+          email: string
+          full_name: string
+          phone_masked: string
+          specific_id: string
+          status: string
+        }[]
       }
       get_teacher_analytics: {
         Args: never
@@ -530,12 +589,17 @@ export type Database = {
         Args: { p_action: string; p_details: Json }
         Returns: undefined
       }
+      reveal_user_pii: {
+        Args: { p_field: string; p_specific_id: string }
+        Returns: string
+      }
       student_cancel_booking: {
         Args: { p_slot_id: string }
         Returns: {
           class_id: string
           created_at: string
           session_date: string
+          session_end_date: string | null
           slot_id: string
           status: Database["public"]["Enums"]["booking_status"]
           student_id: string
@@ -554,6 +618,7 @@ export type Database = {
           class_id: string
           created_at: string
           session_date: string
+          session_end_date: string | null
           slot_id: string
           status: Database["public"]["Enums"]["booking_status"]
           student_id: string
@@ -574,6 +639,7 @@ export type Database = {
           expiry_date: string
           freeze_start_date: string | null
           id: string
+          learning_mode: string
           remaining_sessions: number
           status: Database["public"]["Enums"]["progress_status"]
           student_id: string
