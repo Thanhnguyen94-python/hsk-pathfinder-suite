@@ -134,15 +134,23 @@ export const assignStudentToOfflineClass = createServerFn({ method: "POST" })
 export const getAuditLogs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    // RLS on audit_logs already restricts to admins; this returns [] otherwise.
-    const { data, error } = await context.supabase
-      .from("audit_logs")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(500);
-    if (error) throw new Error(error.message);
-    return data ?? [];
+    const { supabase } = context;
+    const [logs, users] = await Promise.all([
+      supabase
+        .from("audit_logs")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(500),
+      supabase.from("users").select("specific_id, full_name"),
+    ]);
+    if (logs.error) throw new Error(logs.error.message);
+    const nameMap = new Map((users.data ?? []).map((u: any) => [u.specific_id, u.full_name]));
+    return (logs.data ?? []).map((l: any) => ({
+      ...l,
+      user_full_name: l.user_specific_id ? nameMap.get(l.user_specific_id) ?? null : null,
+    }));
   });
+
 
 // ---------- Dashboard reads ----------
 
