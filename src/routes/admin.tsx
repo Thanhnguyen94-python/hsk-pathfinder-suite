@@ -197,8 +197,14 @@ function TeachersTab() {
                 <TableCell className="whitespace-nowrap text-xs">
                   {new Date(r.created_at).toLocaleString()}
                 </TableCell>
-                <TableCell className="font-mono text-xs">{r.teacher_id}</TableCell>
-                <TableCell className="font-mono text-xs">{r.student_id}</TableCell>
+                <TableCell>
+                  <div className="font-medium">{r.teacher_name ?? "—"}</div>
+                  <div className="font-mono text-xs text-muted-foreground">{r.teacher_id}</div>
+                </TableCell>
+                <TableCell>
+                  <div className="font-medium">{r.student_name ?? "—"}</div>
+                  <div className="font-mono text-xs text-muted-foreground">{r.student_id}</div>
+                </TableCell>
                 <TableCell>
                   <div className="flex">
                     {[1, 2, 3, 4, 5].map((n) => (
@@ -213,6 +219,7 @@ function TeachersTab() {
                     ))}
                   </div>
                 </TableCell>
+
                 <TableCell className="max-w-md text-sm">{r.comment ?? "—"}</TableCell>
               </TableRow>
             ))}
