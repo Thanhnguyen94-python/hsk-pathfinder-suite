@@ -292,9 +292,13 @@ function AuditTab() {
                 <TableCell className="whitespace-nowrap text-xs">
                   {new Date(l.created_at).toLocaleString()}
                 </TableCell>
-                <TableCell className="font-mono text-xs">
-                  {l.user_specific_id ?? l.user_id?.slice(0, 8) ?? "—"}
+                <TableCell>
+                  <div className="font-medium">{l.user_full_name ?? "—"}</div>
+                  <div className="font-mono text-xs text-muted-foreground">
+                    {l.user_specific_id ?? l.user_id?.slice(0, 8) ?? "—"}
+                  </div>
                 </TableCell>
+
                 <TableCell className="font-medium">{l.action}</TableCell>
                 <TableCell className="max-w-md font-mono text-[11px] text-muted-foreground">
                   <span className="line-clamp-2">
