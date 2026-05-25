@@ -64,8 +64,11 @@ function Inner() {
               {(q.data?.pendingSlots ?? []).map((b: any) => (
                 <TableRow key={b.slot_id}>
                   <TableCell className="font-mono text-xs">{b.slot_id}</TableCell>
-                  <TableCell>{b.student_id}</TableCell>
-                  <TableCell>{b.class_id}</TableCell>
+                  <TableCell>
+                    <div className="font-medium">{b.student_name ?? "—"}</div>
+                    <div className="font-mono text-xs text-muted-foreground">{b.student_id}</div>
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">{b.class_id}</TableCell>
                   <TableCell>{new Date(b.session_date).toLocaleString()}</TableCell>
                   <TableCell>
                     <Button size="sm" onClick={() => claimM.mutate(b.slot_id)}>
@@ -74,6 +77,7 @@ function Inner() {
                   </TableCell>
                 </TableRow>
               ))}
+
               {(q.data?.pendingSlots ?? []).length === 0 && (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center text-muted-foreground">
