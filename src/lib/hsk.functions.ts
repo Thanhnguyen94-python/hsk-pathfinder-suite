@@ -425,13 +425,22 @@ export const deleteAssignment = createServerFn({ method: "POST" })
 export const listSubmissions = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
-      .from("assignment_submissions")
-      .select("*, assignments(title, course_id, deadline)")
-      .order("submitted_at", { ascending: false });
-    if (error) throw new Error(error.message);
-    return data ?? [];
+    const { supabase } = context;
+    const [subs, users] = await Promise.all([
+      supabase
+        .from("assignment_submissions")
+        .select("*, assignments(title, course_id, deadline)")
+        .order("submitted_at", { ascending: false }),
+      supabase.from("users").select("specific_id, full_name"),
+    ]);
+    if (subs.error) throw new Error(subs.error.message);
+    const nameMap = new Map((users.data ?? []).map((u: any) => [u.specific_id, u.full_name]));
+    return (subs.data ?? []).map((s: any) => ({
+      ...s,
+      student_name: nameMap.get(s.student_id) ?? null,
+    }));
   });
+
 
 export const submitAssignment = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
