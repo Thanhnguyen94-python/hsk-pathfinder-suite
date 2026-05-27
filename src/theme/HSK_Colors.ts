@@ -1,0 +1,15 @@
+export const HSK_Colors = {
+  brandPrimary: "#2563eb",
+  brandSecondary: "#9333ea",
+  success: "#10b981",
+  successSoft: "#d1fae5",
+  warning: "#f59e0b",
+  danger: "#ef4444",
+  neutral: "#737373",
+  neutralBackground: "#f8fafc",
+  neutralSurface: "#ffffff",
+  neutralBorder: "#e5e7eb",
+  crimsonPenalty: "#dc2626",
+  emeraldSuccess: "#10b981",
+  slateText: "#0f172a",
+};
