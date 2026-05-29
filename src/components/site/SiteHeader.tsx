@@ -35,10 +35,10 @@ export function SiteFooter() {
   return (
     <footer className="border-t border-border/60 bg-secondary/30">
       <div className="mx-auto flex max-w-7xl flex-col items-start justify-between gap-4 px-4 py-8 text-sm text-muted-foreground sm:px-6 md:flex-row md:items-center lg:px-8">
-        <div>© 2026 HSK Center · Hệ thống quản lý nội bộ.</div>
+        <div>© 2026 HSK Center · Hán Ngữ Kiều Kiều.</div>
         <div className="flex gap-6">
           <span>HSK 1 — 6</span>
-          <span>1-1 & Offline</span>
+          <span>Lịch học online 1-1 & Offline</span>
           <span>v0.1 mock</span>
         </div>
       </div>

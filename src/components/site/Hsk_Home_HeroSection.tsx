@@ -1,72 +1,100 @@
-import { ArrowRight, GraduationCap, Sparkles } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 
 export function Hsk_Home_HeroSection() {
   return (
-    <section className="relative overflow-hidden bg-[#FCFDFC]">
-      <div className="absolute inset-0 -z-10">
-        <div className="absolute -left-16 top-10 h-[340px] w-[340px] rounded-full bg-[#E8F5E9]/90 blur-3xl" />
-        <div className="absolute right-[-90px] top-36 h-[260px] w-[260px] rounded-full bg-[#E8F5E9]/80 blur-3xl" />
-      </div>
+    <section className="relative px-4 py-12 sm:py-16">
+      <div className="mx-auto max-w-7xl">
+        <div
+          className="relative overflow-hidden rounded-2xl shadow-lg"
+          style={{
+            background: "linear-gradient(90deg, rgba(232,245,233,0.9) 0%, rgba(232,245,233,0.55) 30%, #FCFDFC 100%)",
+          }}
+        >
+          {/* Decorative SVGs (bamboo + panda) */}
+          {/* <svg
+            aria-hidden
+            className="pointer-events-none absolute left-4 top-4 h-40 w-40 opacity-10"
+            viewBox="0 0 200 200"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <g fill="none" stroke="#1B4D3E" strokeWidth="2">
+              <path d="M40 160 C42 120 60 80 70 60" />
+              <path d="M50 160 C52 120 70 80 80 60" />
+              <path d="M60 150 L64 90" />
+              <path d="M74 150 L78 90" />
+            </g>
+          </svg>
 
-      <div className="mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8 lg:py-28">
-        <div className="relative mx-auto max-w-3xl text-center">
-          <div className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-2 text-sm font-medium text-slate-600 shadow-sm shadow-slate-200/70 backdrop-blur-sm">
-            <Sparkles className="h-4 w-4 text-emerald-600" />
-            Học tập HSK 1 - 6 cùng Tiếng Trung Kiều Kiều
-          </div>
+          <svg
+            aria-hidden
+            className="pointer-events-none absolute right-6 bottom-6 h-36 w-36 opacity-10"
+            viewBox="0 0 120 120"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <g fill="#0f172a">
+              <circle cx="30" cy="40" r="10" />
+              <circle cx="65" cy="40" r="12" />
+              <path d="M20 70 Q40 90 60 70 Q80 50 95 70" />
+            </g>
+          </svg> */}
 
-          <h1 className="mt-10 font-display text-4xl font-black tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
-            Học Tiếng Trung Chuẩn HSK 1 - 6
-            <span className="block mt-4 text-3xl font-semibold text-slate-800 sm:text-4xl">
-              Cùng Tiếng Trung Kiều Kiều
-            </span>
-          </h1>
-
-          <p className="mx-auto mt-6 max-w-2xl text-base leading-8 text-slate-600 sm:text-lg">
-            Lộ trình linh hoạt: Học Online 1-1 chủ động khớp lịch hoặc Lớp Offline cố định.
-          </p>
-
-          <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row sm:gap-4">
-            <a
-              href="#contact"
-              className="group inline-flex h-12 items-center justify-center rounded-xl bg-[#1B4D3E] px-6 text-sm font-semibold text-white shadow-lg shadow-emerald-900/10 transition duration-300 ease-out hover:-translate-y-0.5 hover:bg-emerald-600"
-            >
-              Đăng ký tư vấn lộ trình
-              <ArrowRight className="ml-2 h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
-            </a>
-
-            <a
-              href="#trial"
-              className="inline-flex h-12 items-center justify-center rounded-xl border border-[#1B4D3E] bg-white px-6 text-sm font-semibold text-[#1B4D3E] transition duration-300 ease-out hover:bg-[#E8F5E9]/80"
-            >
-              Thi thử HSK miễn phí
-            </a>
-          </div>
-
-          <div className="mx-auto mt-14 overflow-hidden rounded-[32px] border border-slate-200 bg-white/70 p-1 shadow-sm shadow-slate-200/50 backdrop-blur-xl sm:max-w-4xl">
-            <div className="grid grid-cols-1 divide-y divide-slate-200 sm:grid-cols-3 sm:divide-y-0 sm:divide-x">
-              <div className="px-6 py-6 text-left sm:text-center">
-                <div className="flex items-center justify-start gap-2 text-sm font-medium uppercase tracking-[0.18em] text-slate-500 sm:justify-center">
-                  <GraduationCap className="h-4 w-4 text-emerald-600" />
-                  Lộ trình chuẩn hóa
+          <div className="grid grid-cols-1 md:grid-cols-10">
+            {/* Left: Logo + center name (40%) */}
+            <div className="md:col-span-4 flex items-center px-8 py-8">
+              <div className="flex items-center gap-4">
+                <div className="flex h-48 w-48 items-center justify-center rounded-full bg-white shadow-md overflow-hidden p-0 md:h-48 md:w-48">
+                  {/* Thay thế chữ KK bằng thẻ img hiển thị logo mới */}
+                  <img 
+                    src="/assets/ic_logo.PNG" 
+                    alt="Logo Kiều Kiều" 
+                    className="h-full w-full object-contain rounded-full"
+                  />
                 </div>
-                <div className="mt-3 text-2xl font-semibold text-slate-900">6 Cấp độ HSK</div>
+
+                {/* <div className="max-w-xs">
+                  <div className="text-sm font-medium uppercase tracking-wider text-[#1B4D3E]">
+                    TRUNG TÂM
+                  </div>
+                  <div className="mt-1 text-lg font-display text-[#1B4D3E] font-extrabold leading-tight">
+                    TIẾNG TRUNG
+                    <span className="block">KIỀU KIỀU</span>
+                  </div>
+                </div> */}
               </div>
+            </div>
 
-              <div className="px-6 py-6 text-left sm:text-center">
-                <div className="flex items-center justify-start gap-2 text-sm font-medium uppercase tracking-[0.18em] text-slate-500 sm:justify-center">
-                  <Sparkles className="h-4 w-4 text-emerald-600" />
-                  Hình thức linh hoạt
-                </div>
-                <div className="mt-3 text-2xl font-semibold text-slate-900">Online 1-1 & Offline</div>
-              </div>
+            {/* Right: Headline + CTAs (60%) */}
+            <div className="md:col-span-6 flex items-center px-6 py-8">
+              <div className="w-full">
+                <h1 className="font-display text-3xl sm:text-4xl md:text-5xl font-extrabold text-slate-900">
+                  Học Tiếng Trung Chuẩn HSK
+                  {/* <span className="block text-3xl sm:text-4xl md:text-5xl">HSK 1 - 6</span> */}
+                </h1>
 
-              <div className="px-6 py-6 text-left sm:text-center">
-                <div className="flex items-center justify-start gap-2 text-sm font-medium uppercase tracking-[0.18em] text-slate-500 sm:justify-center">
-                  <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">✓</span>
-                  Chất lượng cam kết
+                <p className="mt-4 max-w-xl text-base text-slate-700">
+                  Lộ trình linh hoạt:
+                </p>
+                <ul className="mt-2 max-w-xl text-base text-slate-700 list-disc list-inside space-y-1">
+                  <li>Học Online 1-1 theo lịch cá nhân, phù hợp cho người đi làm.</li>
+                  <li>Học Offline cố định theo lịch cá nhân, có cơ hội giao tiếp thực tế.</li>
+                </ul>
+
+                <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <a
+                    href="#contact"
+                    className="inline-flex items-center justify-center rounded-md bg-[#1B4D3E] px-6 py-3 text-sm font-semibold text-white shadow-md transition-transform duration-200 hover:-translate-y-1"
+                  >
+                    Đăng ký tư vấn lộ trình
+                    <ArrowRight className="ml-3 h-4 w-4" />
+                  </a>
+
+                  <a
+                    href="#trial"
+                    className="inline-flex items-center justify-center rounded-md border border-[#1B4D3E] bg-transparent px-6 py-3 text-sm font-semibold text-[#1B4D3E] transition-colors duration-200 hover:bg-[#E8F5E9]/70"
+                  >
+                    Thi thử HSK miễn phí
+                  </a>
                 </div>
-                <div className="mt-3 text-2xl font-semibold text-slate-900">100% Giảng viên HSK6</div>
               </div>
             </div>
           </div>
