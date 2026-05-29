@@ -1,4 +1,4 @@
-export type Role = "admin" | "logistics" | "teacher" | "student";
+export type Role = "admin" | "logistics" |"CSKH" | "teacher" | "student";
 
 export const notices = [
   {

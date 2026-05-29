@@ -42,29 +42,31 @@ export function Hsk_Home_FeatureGrid() {
           </p>
         </div>
 
-        <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          {features.map((feature, index) => {
-            const Icon = feature.icon;
-            return (
-              <div
-                key={feature.title}
-                className="group relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 text-left shadow-sm transition duration-300 ease-out hover:-translate-y-1 hover:border-[#2E7D32] hover:shadow-md"
-              >
-                <div className="absolute right-6 top-6 text-6xl font-bold text-slate-200 opacity-60">
-                  0{index + 1}
+        <div className="mt-12 overflow-x-auto">
+          <div className="flex gap-5 min-w-max sm:grid sm:grid-cols-2 lg:grid lg:grid-cols-4 sm:min-w-full">
+            {features.map((feature, index) => {
+              const Icon = feature.icon;
+              return (
+                <div
+                  key={feature.title}
+                  className="w-72 flex-shrink-0 sm:w-auto sm:flex-shrink group relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 text-left shadow-sm transition duration-300 ease-out hover:-translate-y-1 hover:border-[#2E7D32] hover:shadow-md"
+                >
+                  <div className="absolute right-6 top-6 text-6xl font-bold text-slate-200 opacity-60">
+                    0{index + 1}
+                  </div>
+                  <div className="relative z-10 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#E8F5E9]/50 text-[#2E7D32] shadow-sm shadow-slate-200/50">
+                    <Icon className="h-6 w-6" />
+                  </div>
+                  <div className="relative z-10 mt-6 text-lg font-semibold text-slate-900">
+                    {feature.title}
+                  </div>
+                  <p className="relative z-10 mt-3 text-sm leading-7 text-slate-600">
+                    {feature.desc}
+                  </p>
                 </div>
-                <div className="relative z-10 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#E8F5E9]/50 text-[#2E7D32] shadow-sm shadow-slate-200/50">
-                  <Icon className="h-6 w-6" />
-                </div>
-                <div className="relative z-10 mt-6 text-lg font-semibold text-slate-900">
-                  {feature.title}
-                </div>
-                <p className="relative z-10 mt-3 text-sm leading-7 text-slate-600">
-                  {feature.desc}
-                </p>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       </div>
     </section>
