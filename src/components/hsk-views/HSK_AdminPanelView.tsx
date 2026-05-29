@@ -4,7 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { assignStudentToOfflineClass, getAuditLogs, getTeacherAnalytics } from "@/lib/hsk.functions";
 import { AdminAuditLogsPanel, AdminMappingPanel, AdminTeacherAnalyticsPanel } from "./HSK_AdminPanelUi";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { HSK_Theme } from "@/theme/HSK_Theme";
+import { HSK_Theme } from "@/theme/hsk-config-theme";
 
 export function HSK_AdminPanelView() {
   const qc = useQueryClient();

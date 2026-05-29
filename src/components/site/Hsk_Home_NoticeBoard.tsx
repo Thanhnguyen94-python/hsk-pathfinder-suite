@@ -1,7 +1,7 @@
 import { Megaphone } from "lucide-react";
 import { notices } from "@/data/mock";
 
-export function NoticeBoard() {
+export function Hsk_Home_NoticeBoard() {
   return (
     <section id="notices" className="border-b border-border/60 bg-secondary/40 py-20 sm:py-24">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
