@@ -3,6 +3,14 @@ import { useHSKStudentBookingViewModel } from "@/hooks/hsk-viewmodels/HSK_useBoo
 import { RatingDialog } from "@/components/common/RatingDialog";
 import { RecurringBookingDialog } from "@/components/common/RecurringBookingDialog";
 import {
+  Radar,
+  RadarChart,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+  ResponsiveContainer,
+} from "recharts";
+import {
   AssignmentsTable,
   BookingsTable,
   ProgressCards,
@@ -10,6 +18,15 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { HSKSlot } from "@/types/hsk-models/hsk-booking.types";
+
+const skillSampleData = [
+  { skill: "Nghe", score: 75 },
+  { skill: "Nói", score: 62 },
+  { skill: "Đọc", score: 80 },
+  { skill: "Viết", score: 55 },
+  { skill: "Từ vựng", score: 70 },
+  { skill: "Ngữ pháp", score: 68 },
+];
 
 export function HSK_StudentDashboardView() {
   const {
@@ -59,6 +76,26 @@ export function HSK_StudentDashboardView() {
           </div>
         </div>
       </section>
+      <div className="rounded-xl border border-border bg-card p-5">
+        <h2 className="mb-3 font-display text-lg font-semibold">Kỹ năng hiện tại</h2>
+        <div className="h-80 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <RadarChart cx="50%" cy="50%" outerRadius="80%" data={skillSampleData}>
+              <PolarGrid />
+              <PolarAngleAxis dataKey="skill" tick={{ fill: "hsl(var(--foreground))", fontSize: 12 }} />
+              <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: "hsl(var(--muted-foreground))" }} />
+              <Radar
+                name="Học viên"
+                dataKey="score"
+                stroke="hsl(var(--primary))"
+                fill="hsl(var(--primary))"
+                fillOpacity={0.3}
+              />
+            </RadarChart>
+          </ResponsiveContainer>
+        </div>
+        <p className="mt-2 text-center text-xs text-muted-foreground">*Điểm đánh giá nội bộ, sẽ cập nhật theo tiến độ thực tế</p>
+      </div>
 
       <Tabs defaultValue={defaultMode}>
         <TabsList>
