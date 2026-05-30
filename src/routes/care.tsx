@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
-import { DashboardShell } from "@/components/site/DashboardShell";
-import { MaskedCell } from "@/components/site/MaskedCell";
+import { DashboardShell } from "@/components/common/DashboardShell";
+import { MaskedCell } from "@/components/common/MaskedCell";
 import { getCareStudents, getCareStaff, getMe } from "@/lib/hsk.functions";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TooltipProvider } from "@/components/ui/tooltip";

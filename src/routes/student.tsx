@@ -1,6 +1,6 @@
 ﻿import { createFileRoute } from "@tanstack/react-router";
-import { DashboardShell } from "@/components/site/DashboardShell";
-import { HSK_StudentDashboardView } from "@/components/hsk-views/HSK_StudentDashboardView";
+import { DashboardShell } from "@/components/common/DashboardShell";
+import { HSK_StudentDashboardView } from "@/components/features/student/HSK_StudentDashboardView";
 
 export const Route = createFileRoute("/student")({
   head: () => ({ meta: [{ title: "Học viên · HSK Center" }] }),

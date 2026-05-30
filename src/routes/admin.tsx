@@ -1,6 +1,6 @@
 ﻿import { createFileRoute } from "@tanstack/react-router";
-import { DashboardShell } from "@/components/site/DashboardShell";
-import { HSK_AdminPanelView } from "@/components/hsk-views/HSK_AdminPanelView";
+import { DashboardShell } from "@/components/common/DashboardShell";
+import { HSK_AdminPanelView } from "@/components/features/admin/HSK_AdminPanelView";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({ meta: [{ title: "Admin · HSK Center" }] }),

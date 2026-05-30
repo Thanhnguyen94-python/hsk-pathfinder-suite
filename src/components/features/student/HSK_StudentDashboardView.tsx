@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useHSKStudentBookingViewModel } from "@/hooks/hsk-viewmodels/HSK_useBookingViewModel";
-import { RatingDialog } from "@/components/site/RatingDialog";
-import { RecurringBookingDialog } from "@/components/site/RecurringBookingDialog";
+import { RatingDialog } from "@/components/common/RatingDialog";
+import { RecurringBookingDialog } from "@/components/common/RecurringBookingDialog";
 import {
   AssignmentsTable,
   BookingsTable,

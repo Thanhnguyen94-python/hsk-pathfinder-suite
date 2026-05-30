@@ -1,7 +1,7 @@
 import { Star } from "lucide-react";
 import { topTeachers } from "@/data/mock";
 
-export function Hsk_Home_TeacherShowcase() {
+export function HSK_HomeTeacherShowcase() {
   return (
     <section id="top-teachers" className="border-b border-border/60 bg-[#FCFDFC] py-20 sm:py-24">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">

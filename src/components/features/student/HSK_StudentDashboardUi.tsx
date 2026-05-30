@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { RatingDialog } from "@/components/site/RatingDialog";
+import { RatingDialog } from "@/components/common/RatingDialog";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import {

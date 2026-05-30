@@ -1,6 +1,6 @@
 import { ArrowRight } from "lucide-react";
 
-export function Hsk_Home_HeroSection() {
+export function HSK_HomeHeroSection() {
   return (
     <section className="relative px-4 py-12 sm:py-16">
       <div className="mx-auto max-w-7xl">

@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Hsk_Home_MainLayoutView } from "@/components/hsk-views/Hsk_Home_MainLayoutView";
+import { HSK_HomeMainLayout } from "@/components/features/home/HSK_HomeMainLayout";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -21,5 +21,5 @@ export const Route = createFileRoute("/")({
 });
 
 function Index() {
-  return <Hsk_Home_MainLayoutView />;
+  return <HSK_HomeMainLayout />;
 }

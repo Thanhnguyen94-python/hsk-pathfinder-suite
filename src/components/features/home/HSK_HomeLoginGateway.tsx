@@ -25,7 +25,7 @@ const toneStyles: Record<string, string> = {
   brand: "bg-brand/10 text-brand ring-brand/20",
 };  
 
-export function Hsk_Home_LoginGateway() {
+export function HSK_HomeLoginGateway() {
   return (
     <section id="login" className="bg-background py-20 sm:py-28">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
