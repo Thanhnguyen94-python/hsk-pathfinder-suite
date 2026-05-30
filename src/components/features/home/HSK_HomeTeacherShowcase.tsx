@@ -2,24 +2,29 @@ import { Star } from "lucide-react";
 import { topTeachers } from "@/data/mock";
 
 export function HSK_HomeTeacherShowcase() {
+  const sortedTeachers = [...topTeachers].sort((a, b) => b.rating - a.rating);
+
   return (
     <section id="top-teachers" className="border-b border-border/60 bg-[#FCFDFC] py-20 sm:py-24">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="mx-auto max-w-3xl text-center">
-          <p className="text-xs font-semibold uppercase tracking-[0.32em] text-[#2E7D32]">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div className="max-w-3xl">
+          <div className="text-xs font-semibold uppercase tracking-[0.32em] text-[#2E7D32]">
             GIÁO VIÊN TIÊU BIỂU
-          </p>
-          <h2 className="mt-4 font-display text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-            Đội ngũ giáo viên tiêu biểu của Tiếng Trung Kiều Kiều
-          </h2>
-          <p className="mt-3 text-base leading-8 text-slate-600 sm:text-lg">
+          </div>
+          <div className="mt-4 flex items-center gap-3">
+            <span className="inline-block h-10 w-1 rounded-full bg-[#2E7D32]" />
+            <h2 className="font-display text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+              Đội ngũ giáo viên tiêu biểu.
+            </h2>
+          </div>
+          <p className="mt-4 text-base leading-8 text-slate-600 sm:text-lg">
             Đội ngũ giảng viên chuyên nghiệp, giàu kinh nghiệm luyện thi HSK và tạo niềm tin cho học viên vãng lai.
           </p>
         </div>
 
         <div className="mt-12 overflow-x-auto">
           <div className="flex gap-6 min-w-max md:grid md:grid-cols-3 xl:grid-cols-4 md:min-w-full">
-            {topTeachers.map((teacher) => (
+            {sortedTeachers.map((teacher) => (
               <article
                 key={teacher.id}
                 className="w-72 flex-shrink-0 md:w-auto md:flex-shrink group overflow-hidden rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm transition duration-300 ease-out hover:-translate-y-1 hover:border-[#2E7D32] hover:shadow-md"

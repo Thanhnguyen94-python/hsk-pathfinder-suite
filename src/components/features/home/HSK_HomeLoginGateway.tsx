@@ -30,14 +30,14 @@ export function HSK_HomeLoginGateway() {
     <section id="login" className="bg-background py-20 sm:py-28">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-2xl text-center">
-          <div className="text-xs font-semibold uppercase tracking-wider text-success">
+          <div className="text-xs font-semibold uppercase tracking-[0.32em] text-success">
             Cổng đăng nhập
           </div>
           <h2 className="mt-3 font-display text-3xl font-bold tracking-tight sm:text-4xl">
-            Chọn vai trò để vào dashboard.
+            Bạn đóng vai trò gì ở trung tâm Hán Ngữ Kiều Kiều?
           </h2>
           <p className="mt-3 text-muted-foreground">
-            Bản demo — chọn một vai trò để xem giao diện tương ứng (chưa có xác thực thật).
+            Hãy đăng ký ngay để trở thành thành viên hoặc đối tác lâu dài của trung tâm Hán Ngữ Kiều Kiều nhé!
           </p>
         </div>
 
@@ -61,7 +61,7 @@ export function HSK_HomeLoginGateway() {
                     {c.desc}
                   </p>
                   <div className="mt-5 flex items-center justify-between text-sm font-medium text-foreground">
-                    <span>Vào dashboard</span>
+                    <span>Đăng nhập.</span>
                     <ArrowUpRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
                   </div>
                 </Link>

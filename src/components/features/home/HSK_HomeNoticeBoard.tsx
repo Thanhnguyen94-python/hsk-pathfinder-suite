@@ -7,12 +7,15 @@ export function HSK_HomeNoticeBoard() {
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex items-end justify-between gap-6">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wider text-brand">
-              Bảng tin trung tâm
+            <div className="text-xs font-semibold uppercase tracking-[0.32em] text-brand">
+              Bảng tin
             </div>
-            <h2 className="mt-3 font-display text-3xl font-bold tracking-tight sm:text-4xl">
-              Thông báo mới nhất.
-            </h2>
+            <div className="mt-4 flex items-center gap-3">
+              <span className="inline-block h-10 w-1 rounded-full bg-brand" />
+              <h2 className="mt-3 font-display text-3xl font-bold tracking-tight sm:text-4xl">
+                Thông báo mới nhất.
+              </h2>
+            </div>
           </div>
           <Megaphone className="hidden h-10 w-10 text-brand/70 sm:block" />
         </div>

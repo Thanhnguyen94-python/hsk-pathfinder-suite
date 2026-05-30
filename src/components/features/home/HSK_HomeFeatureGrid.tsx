@@ -34,7 +34,7 @@ export function HSK_HomeFeatureGrid() {
           <div className="mt-4 flex items-center gap-3">
             <span className="inline-block h-10 w-1 rounded-full bg-[#2E7D32]" />
             <h2 className="font-display text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-              Hệ Thống Tiện Ích Khép Kín Cho Học Viên
+              Hệ thống tiện ích khép kín cho học viên.
             </h2>
           </div>
           <p className="mt-4 text-base leading-8 text-slate-600 sm:text-lg">
