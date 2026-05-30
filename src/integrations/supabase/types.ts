@@ -70,6 +70,7 @@ export type Database = {
           deadline: string
           description: string | null
           title: string
+          slot_id: string | null
         }
         Insert: {
           assignment_id?: string
@@ -79,6 +80,7 @@ export type Database = {
           deadline: string
           description?: string | null
           title: string
+          slot_id?: string | null
         }
         Update: {
           assignment_id?: string
@@ -88,8 +90,17 @@ export type Database = {
           deadline?: string
           description?: string | null
           title?: string
+          slot_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "assignments_slot_id_fkey"
+            columns: ["slot_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["slot_id"]
+          }
+        ]
       }
       audit_logs: {
         Row: {
@@ -458,6 +469,73 @@ export type Database = {
         }
         Relationships: []
       }
+      session_evaluations: {
+        Row: {
+          evaluation_id: string
+          slot_id: string
+          student_id: string
+          teacher_id: string
+          listening_score: number
+          speaking_score: number
+          reading_score: number
+          writing_score: number
+          vocabulary_score: number
+          grammar_score: number
+          general_comment: string | null
+          created_at: string
+        }
+        Insert: {
+          evaluation_id?: string
+          slot_id: string
+          student_id: string
+          teacher_id: string
+          listening_score: number
+          speaking_score: number
+          reading_score: number
+          writing_score: number
+          vocabulary_score: number
+          grammar_score: number
+          general_comment?: string | null
+          created_at?: string
+        }
+        Update: {
+          evaluation_id?: string
+          slot_id?: string
+          student_id?: string
+          teacher_id?: string
+          listening_score?: number
+          speaking_score?: number
+          reading_score?: number
+          writing_score?: number
+          vocabulary_score?: number
+          grammar_score?: number
+          general_comment?: string | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "session_evaluations_slot_id_fkey"
+            columns: ["slot_id"]
+            isOneToOne: true
+            referencedRelation: "bookings"
+            referencedColumns: ["slot_id"]
+          },
+          {
+            foreignKeyName: "session_evaluations_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["specific_id"]
+          },
+          {
+            foreignKeyName: "session_evaluations_teacher_id_fkey"
+            columns: ["teacher_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["specific_id"]
+          }
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -563,6 +641,14 @@ export type Database = {
           phone_masked: string
           specific_id: string
           status: string
+        }[]
+      }
+      get_student_skills: {
+        Args: { p_student_id: string }
+        Returns: {
+          skill: string
+          avg_score: number
+          session_count: number
         }[]
       }
       get_teacher_analytics: {

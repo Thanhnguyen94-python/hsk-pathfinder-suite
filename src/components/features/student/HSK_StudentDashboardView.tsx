@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useHSKStudentBookingViewModel } from "@/hooks/hsk-viewmodels/HSK_useBookingViewModel";
 import { RatingDialog } from "@/components/common/RatingDialog";
-import { RecurringBookingDialog } from "@/components/common/RecurringBookingDialog";
+import { HSK_BookingDialog } from "@/components/common/HSK_BookingDialog";
 import {
   Radar,
   RadarChart,
@@ -36,11 +36,26 @@ export function HSK_StudentDashboardView() {
     ratedSlots,
     assignments,
     submissions,
+    skills,
     cancelSlot,
     freezeCourse,
     unfreezeCourse,
     submitAssignment,
   } = useHSKStudentBookingViewModel();
+
+  const radarData = useMemo(() => {
+    const safeSkills = (skills ?? []) as any[];
+    if (safeSkills.length > 0) {
+      const hasEvaluations = safeSkills.some((s: any) => Number(s.avg_score ?? s.score) > 0);
+      if (hasEvaluations) {
+        return safeSkills.map((s: any) => ({
+          skill: s.skill,
+          score: Number(s.avg_score ?? s.score) || 0,
+        }));
+      }
+    }
+    return skillSampleData;
+  }, [skills]);
 
   const onlineCourses = useMemo(
     () => progress.filter((p) => p.learning_mode === "online"),
@@ -80,7 +95,7 @@ export function HSK_StudentDashboardView() {
         <h2 className="mb-3 font-display text-lg font-semibold">Kỹ năng hiện tại</h2>
         <div className="h-80 w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <RadarChart cx="50%" cy="50%" outerRadius="80%" data={skillSampleData}>
+            <RadarChart cx="50%" cy="50%" outerRadius="80%" data={radarData}>
               <PolarGrid />
               <PolarAngleAxis dataKey="skill" tick={{ fill: "hsl(var(--foreground))", fontSize: 12 }} />
               <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: "hsl(var(--muted-foreground))" }} />
@@ -119,11 +134,8 @@ export function HSK_StudentDashboardView() {
                 Đặt lịch 1-1 với giáo viên
               </h2>
               {onlineCourses.length > 0 && (
-                <RecurringBookingDialog
-                  courses={onlineCourses.map((c) => ({
-                    course_id: c.course_id,
-                    learning_mode: c.learning_mode,
-                  }))}
+                <HSK_BookingDialog
+                  courses={onlineCourses}
                 />
               )}
             </div>

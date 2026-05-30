@@ -6,15 +6,18 @@ import {
   expireStaleFreezes,
   freezeCourse,
   getStudentDashboard,
+  getStudentSkillsById,
   getTeacherDashboard,
   listAssignments,
   listSubmissions,
   studentCancelBooking,
   submitAssignment,
+  submitEvaluation,
   teacherCancelBooking,
   unfreezeCourse,
   getMe,
   getMyRatings,
+  getStudentSkills,
 } from "@/lib/hsk.functions";
 import type { HSKCancellationRule, HSKSlot } from "@/types/hsk-models/hsk-booking.types";
 
@@ -45,6 +48,7 @@ export function useHSKStudentBookingViewModel() {
   const freezeFn = useServerFn(freezeCourse);
   const unfreezeFn = useServerFn(unfreezeCourse);
   const submitFn = useServerFn(submitAssignment);
+  const skillsFn = useServerFn(getStudentSkills);
 
   useEffect(() => {
     expireFn().catch(() => {});
@@ -73,6 +77,11 @@ export function useHSKStudentBookingViewModel() {
   const submissionsQuery = useQuery({
     queryKey: ["my-submissions"],
     queryFn: () => submissionsFn(),
+  });
+
+  const skillsQuery = useQuery({
+    queryKey: ["my-skills"],
+    queryFn: () => skillsFn(),
   });
 
   const cancelMutation = useMutation({
@@ -114,7 +123,12 @@ export function useHSKStudentBookingViewModel() {
     ratedSlots,
     assignments: assignmentsQuery.data ?? [],
     submissions: submissionsQuery.data ?? [],
-    isLoading: dashQuery.isLoading || assignmentsQuery.isLoading || submissionsQuery.isLoading,
+    skills: skillsQuery.data ?? [],
+    isLoading:
+      dashQuery.isLoading ||
+      assignmentsQuery.isLoading ||
+      submissionsQuery.isLoading ||
+      skillsQuery.isLoading,
     cancelSlot: cancelMutation.mutate,
     freezeCourse: freezeMutation.mutate,
     unfreezeCourse: unfreezeMutation.mutate,
@@ -133,6 +147,7 @@ export function useHSKTeacherBookingViewModel() {
   const dashFn = useServerFn(getTeacherDashboard);
   const claimFn = useServerFn(claimSlot);
   const cancelFn = useServerFn(teacherCancelBooking);
+  const submitEvalFn = useServerFn(submitEvaluation);
 
   const dashQuery = useQuery({
     queryKey: ["teacher-dash"],
@@ -149,6 +164,21 @@ export function useHSKTeacherBookingViewModel() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["teacher-dash"] }),
   });
 
+  const evaluationMutation = useMutation({
+    mutationFn: (payload: {
+      slotId: string;
+      studentId: string;
+      listening: number;
+      speaking: number;
+      reading: number;
+      writing: number;
+      vocabulary: number;
+      grammar: number;
+      generalComment?: string;
+    }) => submitEvalFn({ data: payload }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["teacher-dash"] }),
+  });
+
   return {
     pendingSlots: (dashQuery.data?.pendingSlots ?? []) as HSKSlot[],
     myBookings: (dashQuery.data?.myBookings ?? []) as HSKSlot[],
@@ -156,7 +186,28 @@ export function useHSKTeacherBookingViewModel() {
     isLoading: dashQuery.isLoading,
     claimSlot: claimMutation.mutate,
     cancelBooking: cancelMutation.mutate,
+    submitEvaluation: evaluationMutation.mutate,
     claimState: claimMutation,
     cancelState: cancelMutation,
+    evaluationState: evaluationMutation,
+  };
+}
+
+/** Hook riêng để teacher tra cứu skills học viên theo ID (lazy, gọi thủ công) */
+export function useTeacherStudentLookup() {
+  const lookupFn = useServerFn(getStudentSkillsById);
+
+  const mutation = useMutation({
+    mutationFn: (studentId: string) => lookupFn({ data: { studentId } }),
+  });
+
+  return {
+    lookup: mutation.mutate,
+    lookupAsync: mutation.mutateAsync,
+    result: mutation.data,
+    isLoading: mutation.isPending,
+    isError: mutation.isError,
+    error: mutation.error,
+    reset: mutation.reset,
   };
 }

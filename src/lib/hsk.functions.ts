@@ -580,3 +580,110 @@ export const revealUserPii = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { value: value ?? null };
   });
+
+// ---------- Teacher: student skill lookup & evaluation ----------
+
+export const getStudentSkillsById = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) => z.object({ studentId: z.string().min(1) }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    // Verify student exists
+    const { data: student, error: stuErr } = await supabase
+      .from("users")
+      .select("specific_id, full_name, role")
+      .eq("specific_id", data.studentId)
+      .eq("role", "student")
+      .maybeSingle();
+    if (stuErr) throw new Error(stuErr.message);
+    if (!student) return null; // not found — caller will show "no student"
+
+    const { data: skills, error } = await supabase.rpc("get_student_skills", {
+      p_student_id: data.studentId,
+    });
+    if (error) throw new Error(error.message);
+    return { student, skills: skills ?? [] };
+  });
+
+export const submitEvaluation = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        slotId: z.string().min(1),
+        studentId: z.string().min(1),
+        listening: z.number().int().min(0).max(100),
+        speaking: z.number().int().min(0).max(100),
+        reading: z.number().int().min(0).max(100),
+        writing: z.number().int().min(0).max(100),
+        vocabulary: z.number().int().min(0).max(100),
+        grammar: z.number().int().min(0).max(100),
+        generalComment: z.string().max(1000).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    // Resolve teacher id from auth session
+    const { data: me, error: meErr } = await supabase
+      .from("users")
+      .select("specific_id")
+      .single();
+    if (meErr || !me) throw new Error(meErr?.message ?? "Teacher profile not found");
+
+    // Verify the slot is confirmed and belongs to this teacher
+    const { data: slot, error: slotErr } = await supabase
+      .from("bookings")
+      .select("slot_id, teacher_id, student_id, status, session_date")
+      .eq("slot_id", data.slotId)
+      .maybeSingle();
+    if (slotErr) throw new Error(slotErr.message);
+    if (!slot) throw new Error("Slot không tồn tại");
+    if (slot.teacher_id !== me.specific_id)
+      throw new Error("Bạn không phải giáo viên dạy buổi học này");
+    if (slot.status !== "confirmed")
+      throw new Error("Chỉ có thể đánh giá buổi học đã được xác nhận");
+    if (slot.student_id !== data.studentId)
+      throw new Error("Học viên không khớp với buổi học này");
+
+    // Insert — UNIQUE(slot_id) prevents duplicate evaluations per session
+    const { data: row, error } = await supabase
+      .from("session_evaluations")
+      .insert({
+        slot_id: data.slotId,
+        student_id: data.studentId,
+        teacher_id: me.specific_id,
+        listening_score: data.listening,
+        speaking_score: data.speaking,
+        reading_score: data.reading,
+        writing_score: data.writing,
+        vocabulary_score: data.vocabulary,
+        grammar_score: data.grammar,
+        general_comment: data.generalComment ?? null,
+      })
+      .select()
+      .single();
+    if (error) {
+      // Unique violation → already evaluated
+      if (error.code === "23505")
+        throw new Error("Bạn đã đánh giá học viên này cho buổi học này rồi");
+      throw new Error(error.message);
+    }
+    return row;
+  });
+
+export const getStudentSkills = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { supabase } = context;
+    const { data: me, error: meErr } = await supabase
+      .from("users")
+      .select("specific_id")
+      .single();
+    if (meErr || !me) throw new Error(meErr?.message ?? "User profile not found");
+    const { data, error } = await supabase.rpc("get_student_skills", {
+      p_student_id: me.specific_id,
+    });
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  });

@@ -84,7 +84,7 @@ export function RecurringBookingDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button>
-          <CalendarRange className="mr-1.5 h-4 w-4" /> Đặt lịch theo dải ngày
+          <CalendarRange className="mr-1.5 h-4 w-4" /> Đặt lịch học.
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-lg">
