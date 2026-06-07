@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
 // ---------- Bookings ----------
 
@@ -324,7 +325,7 @@ export const upsertChapter = createServerFn({ method: "POST" })
         courseId: z.string().min(1).max(50),
         title: z.string().min(1).max(200),
         content: z.string().max(20000).optional(),
-        pdfUrl: z.string().url().max(500).optional().or(z.literal("")),
+        fileUrls: z.array(z.string().max(500)).optional(),
         orderIndex: z.number().int().min(0).max(999).default(0),
       })
       .parse(d),
@@ -334,7 +335,7 @@ export const upsertChapter = createServerFn({ method: "POST" })
       course_id: data.courseId,
       title: data.title,
       content: data.content ?? null,
-      pdf_url: data.pdfUrl || null,
+      file_urls: data.fileUrls ?? null,
       order_index: data.orderIndex,
       updated_at: new Date().toISOString(),
     };
@@ -560,6 +561,57 @@ export const getCareStaff = createServerFn({ method: "GET" })
     const { data, error } = await context.supabase.rpc("get_care_staff");
     if (error) throw new Error(error.message);
     return data ?? [];
+  });
+
+export const createCareUser = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        email: z.string().email(),
+        password: z.string().min(6),
+        fullName: z.string().min(1),
+        role: z.enum(["student", "teacher", "logistics", "care"]),
+        phone: z.string().min(6).max(32),
+        birthYear: z.number().int().min(1900).max(new Date().getFullYear()),
+        status: z.enum(["active", "disabled"]).default("active"),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: me, error: meErr } = await context.supabase
+      .from("users")
+      .select("role")
+      .eq("id", context.userId)
+      .single();
+    if (meErr || !me) throw new Error(meErr?.message ?? "User not found");
+    if (!["admin", "care"].includes(me.role)) {
+      throw new Error("Forbidden");
+    }
+
+    const { data: authResult, error } = await supabaseAdmin.auth.admin.createUser({
+      email: data.email,
+      password: data.password,
+      user_metadata: {
+        full_name: data.fullName,
+        role: data.role,
+      },
+    });
+
+    if (error) throw new Error(error.message);
+    if (!authResult?.user) throw new Error("Unable to create user account");
+
+    const updatePayload: Record<string, unknown> = { status: data.status };
+    if (data.phone !== undefined) updatePayload.phone = data.phone;
+    if (data.birthYear !== undefined) updatePayload.birth_year = data.birthYear;
+
+    const { error: updateError } = await supabaseAdmin
+      .from("users")
+      .update(updatePayload)
+      .eq("id", authResult.user.id);
+    if (updateError) throw new Error(updateError.message);
+
+    return { specificId: authResult.user.user_metadata?.specific_id ?? null };
   });
 
 export const revealUserPii = createServerFn({ method: "POST" })

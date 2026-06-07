@@ -80,7 +80,7 @@ END $$;
 CREATE OR REPLACE FUNCTION public.get_care_students()
 RETURNS TABLE(
   specific_id text, full_name text, email text,
-  phone_masked text, birth_year_masked text,
+  phone text, birth_year integer,
   status text, created_at timestamptz,
   courses jsonb
 ) LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
@@ -91,8 +91,8 @@ BEGIN
   END IF;
   RETURN QUERY
   SELECT u.specific_id, u.full_name, u.email,
-    CASE WHEN u.phone IS NULL THEN NULL ELSE '••••••••' END,
-    CASE WHEN u.birth_year IS NULL THEN NULL ELSE '••••' END,
+    u.phone,
+    u.birth_year,
     u.status, u.created_at,
     COALESCE((
       SELECT jsonb_agg(jsonb_build_object(
@@ -112,7 +112,7 @@ END $$;
 CREATE OR REPLACE FUNCTION public.get_care_staff()
 RETURNS TABLE(
   specific_id text, full_name text, email text, role app_role,
-  phone_masked text, birth_year_masked text,
+  phone text, birth_year integer,
   status text, created_at timestamptz
 ) LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
 AS $$
@@ -122,8 +122,8 @@ BEGIN
   END IF;
   RETURN QUERY
   SELECT u.specific_id, u.full_name, u.email, u.role,
-    CASE WHEN u.phone IS NULL THEN NULL ELSE '••••••••' END,
-    CASE WHEN u.birth_year IS NULL THEN NULL ELSE '••••' END,
+    u.phone,
+    u.birth_year,
     u.status, u.created_at
   FROM public.users u
   WHERE u.role IN ('teacher','logistics','admin')

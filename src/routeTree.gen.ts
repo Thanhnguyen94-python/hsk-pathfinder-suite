@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TeacherRouteImport } from './routes/teacher'
 import { Route as StudentRouteImport } from './routes/student'
+import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as LogisticsRouteImport } from './routes/logistics'
 import { Route as CareRouteImport } from './routes/care'
 import { Route as AuthRouteImport } from './routes/auth'
@@ -25,6 +26,11 @@ const TeacherRoute = TeacherRouteImport.update({
 const StudentRoute = StudentRouteImport.update({
   id: '/student',
   path: '/student',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProfileRoute = ProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LogisticsRoute = LogisticsRouteImport.update({
@@ -59,6 +65,7 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRoute
   '/care': typeof CareRoute
   '/logistics': typeof LogisticsRoute
+  '/profile': typeof ProfileRoute
   '/student': typeof StudentRoute
   '/teacher': typeof TeacherRoute
 }
@@ -68,6 +75,7 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/care': typeof CareRoute
   '/logistics': typeof LogisticsRoute
+  '/profile': typeof ProfileRoute
   '/student': typeof StudentRoute
   '/teacher': typeof TeacherRoute
 }
@@ -78,6 +86,7 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/care': typeof CareRoute
   '/logistics': typeof LogisticsRoute
+  '/profile': typeof ProfileRoute
   '/student': typeof StudentRoute
   '/teacher': typeof TeacherRoute
 }
@@ -89,6 +98,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/care'
     | '/logistics'
+    | '/profile'
     | '/student'
     | '/teacher'
   fileRoutesByTo: FileRoutesByTo
@@ -98,6 +108,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/care'
     | '/logistics'
+    | '/profile'
     | '/student'
     | '/teacher'
   id:
@@ -107,6 +118,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/care'
     | '/logistics'
+    | '/profile'
     | '/student'
     | '/teacher'
   fileRoutesById: FileRoutesById
@@ -117,6 +129,7 @@ export interface RootRouteChildren {
   AuthRoute: typeof AuthRoute
   CareRoute: typeof CareRoute
   LogisticsRoute: typeof LogisticsRoute
+  ProfileRoute: typeof ProfileRoute
   StudentRoute: typeof StudentRoute
   TeacherRoute: typeof TeacherRoute
 }
@@ -135,6 +148,13 @@ declare module '@tanstack/react-router' {
       path: '/student'
       fullPath: '/student'
       preLoaderRoute: typeof StudentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/profile': {
+      id: '/profile'
+      path: '/profile'
+      fullPath: '/profile'
+      preLoaderRoute: typeof ProfileRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/logistics': {
@@ -181,6 +201,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthRoute: AuthRoute,
   CareRoute: CareRoute,
   LogisticsRoute: LogisticsRoute,
+  ProfileRoute: ProfileRoute,
   StudentRoute: StudentRoute,
   TeacherRoute: TeacherRoute,
 }

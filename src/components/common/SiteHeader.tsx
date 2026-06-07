@@ -18,6 +18,7 @@ export function SiteHeader() {
           <a href="#features" className="transition-colors hover:text-foreground">Tính năng</a>
           <a href="#notices" className="transition-colors hover:text-foreground">Bảng tin</a>
           <a href="#login" className="transition-colors hover:text-foreground">Đăng nhập</a>
+          <Link to="/care" className="transition-colors hover:text-foreground">CSKH</Link>
         </nav>
         <Link
           to="/auth"

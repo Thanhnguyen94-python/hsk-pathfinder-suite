@@ -11,6 +11,7 @@
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:run": "vitest run",
+    "seed:care": "node ./scripts/create-care-account.js",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

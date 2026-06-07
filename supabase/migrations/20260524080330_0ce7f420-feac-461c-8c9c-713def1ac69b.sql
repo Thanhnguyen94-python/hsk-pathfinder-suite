@@ -2,7 +2,7 @@
 -- =========================================================
 -- ENUMS
 -- =========================================================
-create type public.app_role as enum ('admin', 'logistics', 'teacher', 'student');
+create type public.app_role as enum ('admin', 'logistics', 'teacher', 'student', 'care');
 create type public.progress_status as enum ('active', 'frozen', 'expired');
 create type public.class_type as enum ('online_1_1', 'offline_group');
 create type public.booking_status as enum ('pending', 'confirmed', 'cancelled_valid', 'cancelled_late');
@@ -501,6 +501,7 @@ begin
       when 'student' then 'HV-' || to_char(now(),'YY') || '-' || lpad((floor(random()*9999)+1)::text,4,'0')
       when 'teacher' then 'GV-' || to_char(now(),'YY') || '-' || lpad((floor(random()*9999)+1)::text,4,'0')
       when 'logistics' then 'LG-' || to_char(now(),'YY') || '-' || lpad((floor(random()*9999)+1)::text,4,'0')
+      when 'care' then 'CS-' || to_char(now(),'YY') || '-' || lpad((floor(random()*9999)+1)::text,4,'0')
       else 'AD-' || to_char(now(),'YY') || '-' || lpad((floor(random()*9999)+1)::text,4,'0')
     end
   );

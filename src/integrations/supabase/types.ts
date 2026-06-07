@@ -285,6 +285,7 @@ export type Database = {
           created_at: string
           order_index: number
           pdf_url: string | null
+          file_urls: string[] | null
           title: string
           updated_at: string
         }
@@ -295,6 +296,7 @@ export type Database = {
           created_at?: string
           order_index?: number
           pdf_url?: string | null
+          file_urls?: string[] | null
           title: string
           updated_at?: string
         }
@@ -305,6 +307,7 @@ export type Database = {
           created_at?: string
           order_index?: number
           pdf_url?: string | null
+          file_urls?: string[] | null
           title?: string
           updated_at?: string
         }
@@ -740,7 +743,7 @@ export type Database = {
       }
     }
     Enums: {
-      app_role: "admin" | "logistics" | "teacher" | "student"
+      app_role: "admin" | "logistics" | "teacher" | "student" | "care"
       booking_status:
         | "pending"
         | "confirmed"
@@ -875,7 +878,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["admin", "logistics", "teacher", "student"],
+      app_role: ["admin", "logistics", "teacher", "student", "care"],
       booking_status: [
         "pending",
         "confirmed",

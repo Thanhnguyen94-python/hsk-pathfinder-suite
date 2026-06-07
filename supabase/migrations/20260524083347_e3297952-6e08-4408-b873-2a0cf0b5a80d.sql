@@ -84,6 +84,7 @@ CREATE TABLE public.hsk_chapters (
   title text NOT NULL,
   content text,
   pdf_url text,
+  file_urls text[],
   order_index int NOT NULL DEFAULT 0,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()

@@ -16,7 +16,8 @@
 - **Đánh giá kỹ năng học viên:** Giáo viên chấm điểm 6 kỹ năng (Nghe, Nói, Đọc, Viết, Từ vựng, Ngữ pháp) sau mỗi buổi học
 - **Rating giáo viên:** Học viên đánh giá sao + nhận xét sau buổi học
 - **Freeze/Unfreeze khoá học:** Học viên tạm dừng khoá học tối đa 30 ngày
-- **CSKH (Chăm sóc khách hàng):** Danh bạ học viên + nhân viên với trường nhạy cảm được che (PII masking)
+- **CSKH (Chăm sóc khách hàng):** Danh bạ học viên + nhân viên với chỉ mật khẩu được bảo mật; hỗ trợ tìm kiếm, sắp xếp, và tạo tài khoản mới ngay tại trang CSKH
+- **Trang cá nhân:** Người dùng có thể đổi mật khẩu tài khoản sau khi đăng nhập
 - **Admin panel:** Gán học viên vào lớp, xem analytics giáo viên, audit log toàn hệ thống
 
 ### Vai trò người dùng (Roles)
@@ -29,7 +30,9 @@
 | `care` | Chăm sóc khách hàng | `/care` |
 | `admin` | Quản trị viên toàn quyền | `/admin` |
 
-> **Lưu ý:** Role `care` trong DB Supabase không có trong `app_role` enum (chỉ có `admin | logistics | teacher | student`). Route `/care` truy cập được bởi bất kỳ ai đăng nhập, với nội dung hiển thị khác nhau giữa admin và non-admin.
+> **Lưu ý:** Role `care` đã được mở rộng trong schema DB để tạo tài khoản CSKH trực tiếp. Route `/care` truy cập được bởi bất kỳ ai đăng nhập, với nội dung hiển thị khác nhau giữa admin và non-admin.
+
+> **Tạo tài khoản CSKH:** chạy `npm run seed:care` (cần `SUPABASE_SERVICE_ROLE_KEY`). Mặc định script sẽ tạo tài khoản `care@hsk.local` / `Care1234!` và role `care`. Trang `/auth` hiện chỉ cho phép đăng nhập — CSKH hoặc Admin sẽ tạo tài khoản mới cho người dùng trong `/care`.
 
 ### Công nghệ, Framework và Thư viện chính
 
@@ -93,11 +96,12 @@ hsk_system/
     ├── routes/                   # File-based routing (TanStack Router)
     │   ├── __root.tsx            # Root layout: QueryClientProvider, NotFound, Error pages
     │   ├── index.tsx             # Route "/" — Trang chủ công khai
-    │   ├── auth.tsx              # Route "/auth" — Đăng nhập / Đăng ký
+    │   ├── auth.tsx              # Route "/auth" — Đăng nhập chỉ
     │   ├── student.tsx           # Route "/student" — Dashboard học viên
     │   ├── teacher.tsx           # Route "/teacher" — Dashboard giáo viên
     │   ├── logistics.tsx         # Route "/logistics" — Quản lý giáo trình & chấm bài
     │   ├── care.tsx              # Route "/care" — CSKH: danh bạ học viên & nhân viên
+    │   ├── profile.tsx           # Route "/profile" — Trang cá nhân/đổi mật khẩu
     │   └── admin.tsx             # Route "/admin" — Admin panel tổng
     │
     ├── components/
@@ -215,9 +219,9 @@ progress_status:'active' | 'frozen' | 'expired'
 | `expire_stale_freezes()` | Tự động hết hạn freeze >30 ngày |
 | `assign_student_to_offline_class(...)` | Admin gán học viên vào lớp offline |
 | `get_teacher_analytics()` | Thống kê rating + penalty giáo viên |
-| `get_care_students()` | Danh sách học viên với PII masking |
-| `get_care_staff()` | Danh sách nhân viên với PII masking |
-| `reveal_user_pii(p_specific_id, p_field)` | Admin xem SĐT/năm sinh thật |
+| `get_care_students()` | Danh sách học viên với email, SĐT, năm sinh đầy đủ (chỉ ẩn mật khẩu trong UI) |
+| `get_care_staff()` | Danh sách nhân viên với email, SĐT, năm sinh đầy đủ (chỉ ẩn mật khẩu trong UI) |
+| `reveal_user_pii(p_specific_id, p_field)` | Admin xem SĐT/năm sinh thật — hiện không cần ẩn dữ liệu cho CSKH |
 | `get_student_skills(p_student_id)` | Điểm kỹ năng trung bình từ session_evaluations |
 | `get_top_teachers(p_limit)` | Top giáo viên theo rating |
 | `log_action(p_action, p_details)` | Ghi audit log |
