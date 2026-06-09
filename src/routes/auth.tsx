@@ -1,6 +1,8 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
+import { getMyRole } from "@/lib/hsk.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,6 +13,14 @@ export const Route = createFileRoute("/auth")({
   component: AuthPage,
 });
 
+const ROLE_ROUTES: Record<string, string> = {
+  admin: "/admin",
+  teacher: "/teacher",
+  logistics: "/logistics",
+  care: "/care",
+  student: "/student",
+};
+
 function AuthPage() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
@@ -18,29 +28,27 @@ function AuthPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Gọi server function — dùng supabaseAdmin (service role key) bypass RLS hoàn toàn
+  const getMyRoleFn = useServerFn(getMyRole);
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setLoading(true);
     try {
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ email, password });
+      // Bước 1: Đăng nhập, lấy JWT session
+      const { error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
       if (authError) throw authError;
-      const userId = authData?.user?.id;
-      const { data: u } = await supabase
-        .from("users")
-        .select("role")
-        .eq("id", userId)
-        .single();
-      const target =
-        u?.role === "teacher"
-          ? "/teacher"
-          : u?.role === "admin"
-            ? "/admin"
-            : u?.role === "logistics"
-              ? "/logistics"
-              : u?.role === "care"
-                ? "/care"
-                : "/student";
+
+      // Bước 2: Lấy role từ server (middleware tự đọc Bearer token từ session)
+      // supabaseAdmin bypass RLS → luôn trả về đúng role dù RLS có vấn đề gì
+      const { role } = await getMyRoleFn();
+
+      // Bước 3: Redirect theo role
+      const target = ROLE_ROUTES[role] ?? "/student";
       navigate({ to: target });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Có lỗi xảy ra");

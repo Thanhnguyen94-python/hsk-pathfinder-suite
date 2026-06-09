@@ -5,27 +5,45 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
-function createSupabaseAdminClient() {
+function createSupabaseAdminClient(): any {
   const SUPABASE_URL = process.env.SUPABASE_URL;
   const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    const missing = [
-      ...(!SUPABASE_URL ? ['SUPABASE_URL'] : []),
-      ...(!SUPABASE_SERVICE_ROLE_KEY ? ['SUPABASE_SERVICE_ROLE_KEY'] : []),
-    ];
-    const message = `Missing Supabase environment variable(s): ${missing.join(', ')}. Connect Supabase in Lovable Cloud.`;
-    console.error(`[Supabase] ${message}`);
-    throw new Error(message);
+  // If required env is present, create a normal admin client.
+  if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+    return createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: {
+        storage: undefined,
+        persistSession: false,
+        autoRefreshToken: false,
+      }
+    });
   }
 
-  return createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-    auth: {
-      storage: undefined,
-      persistSession: false,
-      autoRefreshToken: false,
-    }
-  });
+  // If env missing, return a proxy object that will throw a clear error when used.
+  // This prevents the app from crashing at import time and gives friendlier
+  // runtime errors for admin-only operations when running local dev without keys.
+  const missing = [
+    ...(!SUPABASE_URL ? ['SUPABASE_URL'] : []),
+    ...(!SUPABASE_SERVICE_ROLE_KEY ? ['SUPABASE_SERVICE_ROLE_KEY'] : []),
+  ];
+  const message = `Missing Supabase environment variable(s): ${missing.join(', ')}. Admin operations are disabled.`;
+  console.warn(`[Supabase] ${message}`);
+
+  const handler: ProxyHandler<any> = {
+    get(_target, prop) {
+      return (..._args: any[]) => {
+        throw new Error(
+          `[Supabase Admin Disabled] ${message} Provide these in your .env to enable admin features (e.g. create users, DB admin). Attempted to call: ${String(prop)}`
+        );
+      };
+    },
+    apply(_target, _thisArg, _args) {
+      throw new Error(`[Supabase Admin Disabled] ${message}`);
+    },
+  };
+
+  return new Proxy({}, handler) as unknown as ReturnType<typeof createSupabaseAdminClient>;
 }
 
 let _supabaseAdmin: ReturnType<typeof createSupabaseAdminClient> | undefined;

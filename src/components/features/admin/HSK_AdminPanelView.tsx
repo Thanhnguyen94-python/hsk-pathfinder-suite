@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { assignStudentToOfflineClass, createCareUser, getAuditLogs, getTeacherAnalytics } from "@/lib/hsk.functions";
-import { AdminAuditLogsPanel, AdminMappingPanel, AdminTeacherAnalyticsPanel } from "./HSK_AdminPanelUi";
+import { assignStudentToOfflineClass, createCareUser, getAuditLogs, getTeacherAnalytics, getAllUsersAdmin, updateUserAdmin, deleteUserAdmin } from "@/lib/hsk.functions";
+import { AdminAuditLogsPanel, AdminMappingPanel, AdminTeacherAnalyticsPanel, AdminUserManagementPanel } from "./HSK_AdminPanelUi";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,8 +27,24 @@ export function HSK_AdminPanelView() {
   const [phone, setPhone] = useState("");
   const [birthYear, setBirthYear] = useState("");
   const [status, setStatus] = useState<"active" | "disabled">("active");
+  const [showPassword, setShowPassword] = useState(false);
 
   const createUserFn = useServerFn(createCareUser);
+  const getAllUsersFn = useServerFn(getAllUsersAdmin);
+  const updateUserFn = useServerFn(updateUserAdmin);
+  const deleteUserFn = useServerFn(deleteUserAdmin);
+
+  const usersQuery = useQuery({ queryKey: ["admin-users"], queryFn: () => getAllUsersFn() });
+
+  const updateMutation = useMutation({
+    mutationFn: (payload: any) => updateUserFn({ data: payload }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-users"] }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (payload: { id: string }) => deleteUserFn({ data: payload }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-users"] }),
+  });
   const createUserMutation = useMutation({
     mutationFn: (payload: {
       email: string;
@@ -59,6 +76,9 @@ export function HSK_AdminPanelView() {
     !Number.isNaN(birthYearNumber) &&
     birthYearNumber >= 1900 &&
     birthYearNumber <= new Date().getFullYear();
+
+  const hasInput = Boolean(fullName || email || password || phone || birthYear);
+  const showValidationError = !isCreateFormValid && hasInput && !createUserMutation.isSuccess;
 
   const auditQuery = useQuery({ queryKey: ["audit"], queryFn: () => auditFn() });
   const analyticsQuery = useQuery({ queryKey: ["teacher-analytics"], queryFn: () => analyticsFn() });
@@ -127,9 +147,14 @@ export function HSK_AdminPanelView() {
                 <Label>Email</Label>
                 <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-1.5 relative">
                 <Label>Mật khẩu</Label>
-                <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+                <div className="relative">
+                  <Input type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} />
+                  <Button type="button" variant="ghost" size="icon" className="absolute right-0 top-0 h-9 w-9" onClick={() => setShowPassword(!showPassword)}>
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
               </div>
               <div className="space-y-1.5">
                 <Label>Vai trò</Label>
@@ -189,7 +214,7 @@ export function HSK_AdminPanelView() {
               >
                 Tạo tài khoản mới
               </Button>
-              {!isCreateFormValid && (
+              {showValidationError && (
                 <div className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-700">
                   Xin hãy điền đầy đủ họ tên, email, mật khẩu, số điện thoại và năm sinh hợp lệ.
                 </div>
@@ -206,6 +231,19 @@ export function HSK_AdminPanelView() {
               )}
             </div>
           </div>
+          
+          <AdminUserManagementPanel 
+            users={usersQuery.data ?? []}
+            isPending={updateMutation.isPending || deleteMutation.isPending}
+            onUpdateUser={(payload) => updateMutation.mutate(payload)}
+            onDeleteUser={(id, hardDelete) => {
+              if (hardDelete) {
+                deleteMutation.mutate({ id });
+              } else {
+                updateMutation.mutate({ id, status: "disabled" });
+              }
+            }}
+          />
         </TabsContent>
       </Tabs>
     </div>

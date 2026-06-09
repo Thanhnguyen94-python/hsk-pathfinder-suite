@@ -153,6 +153,28 @@ export const getAuditLogs = createServerFn({ method: "GET" })
   });
 
 
+// ---------- Auth role lookup (bypasses RLS via service role) ----------
+
+/**
+ * Đọc role của user hiện tại bằng supabaseAdmin (service key) — bypass RLS.
+ * Dùng sau khi signInWithPassword để lấy role và redirect đúng dashboard.
+ */
+export const getMyRole = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data, error } = await supabaseAdmin
+      .from("users")
+      .select("role, full_name, specific_id")
+      .eq("id", context.userId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return {
+      role: (data?.role as string) ?? "student",
+      fullName: (data?.full_name as string) ?? null,
+      specificId: (data?.specific_id as string) ?? null,
+    };
+  });
+
 // ---------- Dashboard reads ----------
 
 export const getMe = createServerFn({ method: "GET" })
@@ -244,8 +266,12 @@ export const rateTeacher = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { supabase } = context;
-    const { data: me } = await supabase.from("users").select("specific_id").single();
+    const { supabase, userId } = context;
+    const { data: me } = await supabaseAdmin
+      .from("users")
+      .select("specific_id")
+      .eq("id", userId)
+      .maybeSingle();
     if (!me) throw new Error("User not found");
     const { data: row, error } = await supabase
       .from("teacher_ratings")
@@ -390,10 +416,11 @@ export const createAssignment = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { data: me } = await context.supabase
+    const { data: me } = await supabaseAdmin
       .from("users")
       .select("specific_id")
-      .single();
+      .eq("id", context.userId)
+      .maybeSingle();
     const { data: row, error } = await context.supabase
       .from("assignments")
       .insert({
@@ -455,10 +482,11 @@ export const submitAssignment = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { data: me } = await context.supabase
+    const { data: me } = await supabaseAdmin
       .from("users")
       .select("specific_id")
-      .single();
+      .eq("id", context.userId)
+      .maybeSingle();
     const { data: row, error } = await context.supabase
       .from("assignment_submissions")
       .upsert(
@@ -489,10 +517,11 @@ export const gradeSubmission = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { data: me } = await context.supabase
+    const { data: me } = await supabaseAdmin
       .from("users")
       .select("specific_id")
-      .single();
+      .eq("id", context.userId)
+      .maybeSingle();
     const { data: row, error } = await context.supabase
       .from("assignment_submissions")
       .update({
@@ -579,12 +608,17 @@ export const createCareUser = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { data: me, error: meErr } = await context.supabase
+    // Sử dụng supabaseAdmin để bypass RLS khi check role của admin,
+    // đảm bảo không bị lỗi do RLS block.
+    const { data: me, error: meErr } = await supabaseAdmin
       .from("users")
       .select("role")
       .eq("id", context.userId)
-      .single();
-    if (meErr || !me) throw new Error(meErr?.message ?? "User not found");
+      .maybeSingle();
+    if (meErr) throw new Error(meErr.message);
+    if (!me) {
+      throw new Error(`User profile not found in public.users for auth ID: ${context.userId}. Please check database.`);
+    }
     if (!["admin", "care"].includes(me.role)) {
       throw new Error("Forbidden");
     }
@@ -592,6 +626,7 @@ export const createCareUser = createServerFn({ method: "POST" })
     const { data: authResult, error } = await supabaseAdmin.auth.admin.createUser({
       email: data.email,
       password: data.password,
+      email_confirm: true, // Tự động xác nhận email
       user_metadata: {
         full_name: data.fullName,
         role: data.role,
@@ -601,7 +636,7 @@ export const createCareUser = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     if (!authResult?.user) throw new Error("Unable to create user account");
 
-    const updatePayload: Record<string, unknown> = { status: data.status };
+    const updatePayload: Record<string, unknown> = { status: data.status, role: data.role };
     if (data.phone !== undefined) updatePayload.phone = data.phone;
     if (data.birthYear !== undefined) updatePayload.birth_year = data.birthYear;
 
