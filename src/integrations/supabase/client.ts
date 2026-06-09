@@ -14,9 +14,23 @@ function createSupabaseClient() {
       ...(!SUPABASE_PUBLISHABLE_KEY ? ['SUPABASE_PUBLISHABLE_KEY'] : []),
     ];
     const message = `Missing Supabase environment variable(s): ${missing.join(', ')}. Connect Supabase in Lovable Cloud.`;
-    console.error(`[Supabase] ${message}`);
-    throw new Error(message);
+    // Log a warning but do not throw here — return a minimal stub client so the
+    // app can render a friendly error or unauthenticated state instead of crashing.
+    console.warn(`[Supabase] ${message}`);
+
+    // Minimal stub to satisfy callers that only use `auth` in the client-side
+    // (getSession, onAuthStateChange, signOut). Other features will be unavailable.
+    const stub: any = {
+      auth: {
+        getSession: async () => ({ data: { session: null } }),
+        onAuthStateChange: (_callback: any) => ({ data: { subscription: { unsubscribe: () => {} } } }),
+        signOut: async () => {},
+      },
+    };
+
+    return stub as unknown as ReturnType<typeof createSupabaseClient>;
   }
+  
 
   return createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
     auth: {

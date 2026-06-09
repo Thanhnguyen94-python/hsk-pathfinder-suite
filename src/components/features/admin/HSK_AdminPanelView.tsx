@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useAuth } from "@/hooks/use-auth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { assignStudentToOfflineClass, createCareUser, getAuditLogs, getTeacherAnalytics, getAllUsersAdmin, updateUserAdmin, deleteUserAdmin } from "@/lib/hsk.functions";
@@ -13,6 +14,7 @@ import { HSK_Theme } from "@/theme/hsk-config-theme";
 
 export function HSK_AdminPanelView() {
   const qc = useQueryClient();
+  const { user, loading } = useAuth();
   const assignFn = useServerFn(assignStudentToOfflineClass);
   const auditFn = useServerFn(getAuditLogs);
   const analyticsFn = useServerFn(getTeacherAnalytics);
@@ -34,7 +36,7 @@ export function HSK_AdminPanelView() {
   const updateUserFn = useServerFn(updateUserAdmin);
   const deleteUserFn = useServerFn(deleteUserAdmin);
 
-  const usersQuery = useQuery({ queryKey: ["admin-users"], queryFn: () => getAllUsersFn() });
+  const usersQuery = useQuery({ queryKey: ["admin-users"], queryFn: () => getAllUsersFn(), enabled: Boolean(!loading && user) });
 
   const updateMutation = useMutation({
     mutationFn: (payload: any) => updateUserFn({ data: payload }),
@@ -63,6 +65,7 @@ export function HSK_AdminPanelView() {
       setPhone("");
       setBirthYear("");
       setStatus("active");
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
     },
   });
 
@@ -80,8 +83,8 @@ export function HSK_AdminPanelView() {
   const hasInput = Boolean(fullName || email || password || phone || birthYear);
   const showValidationError = !isCreateFormValid && hasInput && !createUserMutation.isSuccess;
 
-  const auditQuery = useQuery({ queryKey: ["audit"], queryFn: () => auditFn() });
-  const analyticsQuery = useQuery({ queryKey: ["teacher-analytics"], queryFn: () => analyticsFn() });
+  const auditQuery = useQuery({ queryKey: ["audit"], queryFn: () => auditFn(), enabled: Boolean(!loading && user) });
+  const analyticsQuery = useQuery({ queryKey: ["teacher-analytics"], queryFn: () => analyticsFn(), enabled: Boolean(!loading && user) });
 
   const handleAssign = async () => {
     await assignFn({ data: { studentId, classId } });

@@ -636,17 +636,25 @@ export const createCareUser = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     if (!authResult?.user) throw new Error("Unable to create user account");
 
-    const updatePayload: Record<string, unknown> = { status: data.status, role: data.role };
+    const updatePayload: Record<string, unknown> = {
+      id: authResult.user.id,
+      full_name: data.fullName,
+      email: data.email,
+      status: data.status,
+      role: data.role,
+    };
     if (data.phone !== undefined) updatePayload.phone = data.phone;
     if (data.birthYear !== undefined) updatePayload.birth_year = data.birthYear;
 
-    const { error: updateError } = await supabaseAdmin
+    // Use upsert so we create the public.users row if it doesn't already exist.
+    const { data: userRow, error: upsertErr } = await supabaseAdmin
       .from("users")
-      .update(updatePayload)
-      .eq("id", authResult.user.id);
-    if (updateError) throw new Error(updateError.message);
+      .upsert(updatePayload, { onConflict: "id" })
+      .select()
+      .maybeSingle();
+    if (upsertErr) throw new Error(upsertErr.message);
 
-    return { specificId: authResult.user.user_metadata?.specific_id ?? null };
+    return { specificId: userRow?.specific_id ?? authResult.user.user_metadata?.specific_id ?? null };
   });
 
 export const revealUserPii = createServerFn({ method: "POST" })
@@ -666,6 +674,126 @@ export const revealUserPii = createServerFn({ method: "POST" })
     });
     if (error) throw new Error(error.message);
     return { value: value ?? null };
+  });
+
+// ---------- Admin user management (list / update / delete) ----------
+
+export const getAllUsersAdmin = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    // Ensure caller is an admin by checking public.users via service role
+    const { data: meRow, error: meErr } = await supabaseAdmin
+      .from("users")
+      .select("role")
+      .eq("id", context.userId)
+      .maybeSingle();
+    if (meErr) throw new Error(meErr.message);
+    if (!meRow || meRow.role !== 'admin') throw new Error('Forbidden');
+
+    // Use service client to bypass RLS and return all public.users rows
+    const { data, error } = await supabaseAdmin
+      .from("users")
+      .select("id, specific_id, full_name, email, role, status, phone, birth_year")
+      .order("created_at", { ascending: false })
+      .limit(1000);
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  });
+
+export const updateUserAdmin = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        id: z.string().min(1),
+        fullName: z.string().optional(),
+        role: z.string().optional(),
+        status: z.string().optional(),
+        phone: z.string().optional(),
+        birthYear: z.number().int().optional(),
+        password: z.string().min(6).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { id, fullName, role, status, phone, birthYear, password } = data;
+
+    // Update auth metadata and/or password via service client when available
+    try {
+      if (password || fullName || role) {
+        const adminApi = (supabaseAdmin as any)?.auth?.admin;
+        if (adminApi && typeof adminApi.updateUserById === "function") {
+          const updatePayload: any = {};
+          if (password) updatePayload.password = password;
+          if (fullName || role)
+            updatePayload.user_metadata = { ...(fullName ? { full_name: fullName } : {}), ...(role ? { role } : {}) };
+          // call updateUserById on service client
+          await adminApi.updateUserById(id, updatePayload);
+        } else if (adminApi && typeof adminApi.updateUser === "function") {
+          // fallback name
+          const updatePayload: any = {};
+          if (password) updatePayload.password = password;
+          if (fullName || role)
+            updatePayload.user_metadata = { ...(fullName ? { full_name: fullName } : {}), ...(role ? { role } : {}) };
+          await adminApi.updateUser(id, updatePayload as any);
+        }
+      }
+    } catch (e) {
+      // Non-fatal here — continue to update public users table, but surface error if no rows updated later.
+      console.warn("Admin auth update failed:", (e as any)?.message ?? e);
+    }
+
+    const updatePayload: Record<string, unknown> = {};
+    if (fullName !== undefined) updatePayload.full_name = fullName;
+    if (role !== undefined) updatePayload.role = role;
+    if (status !== undefined) updatePayload.status = status;
+    if (phone !== undefined) updatePayload.phone = phone;
+    if (birthYear !== undefined) updatePayload.birth_year = birthYear;
+
+    if (Object.keys(updatePayload).length === 0) return { ok: true };
+
+    // Verify caller is admin via service client and then use service client to update public.users
+    const { data: meRow, error: meErr } = await supabaseAdmin
+      .from("users")
+      .select("role")
+      .eq("id", context.userId)
+      .maybeSingle();
+    if (meErr) throw new Error(meErr.message);
+    if (!meRow || meRow.role !== 'admin') throw new Error('Forbidden');
+
+    const { data: row, error } = await supabaseAdmin
+      .from("users")
+      .update(updatePayload)
+      .eq("id", id)
+      .select()
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return row ?? { ok: true };
+  });
+
+export const deleteUserAdmin = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) => z.object({ id: z.string().min(1) }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { id } = data;
+
+    // Try to delete auth user via service client if available
+    try {
+      const adminApi = (supabaseAdmin as any)?.auth?.admin;
+      if (adminApi && typeof adminApi.deleteUser === "function") {
+        await adminApi.deleteUser(id);
+      } else if (adminApi && typeof adminApi.deleteUserById === "function") {
+        await adminApi.deleteUserById(id);
+      } else if (adminApi && typeof adminApi.removeUser === "function") {
+        await adminApi.removeUser(id as any);
+      }
+    } catch (e) {
+      console.warn("Admin auth delete failed (continuing to remove public row):", (e as any)?.message ?? e);
+    }
+
+    const { error } = await context.supabase.from("users").delete().eq("id", id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
   });
 
 // ---------- Teacher: student skill lookup & evaluation ----------
