@@ -30,3 +30,16 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+# Chặn file chứa các key bí mật của môi trường
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Chặn thư viện bên thứ ba
+node_modules/
+
+# Nếu bạn dùng Supabase CLI dưới máy tính, chặn các file chứa mật khẩu db
+supabase/.temp/
+.supabase/

@@ -693,7 +693,7 @@ export const getAllUsersAdmin = createServerFn({ method: "GET" })
     // Use service client to bypass RLS and return all public.users rows
     const { data, error } = await supabaseAdmin
       .from("users")
-      .select("id, specific_id, full_name, email, role, status, phone, birth_year")
+      .select("id, specific_id, full_name, email, role, status, phone, birth_year, created_at, updated_at")
       .order("created_at", { ascending: false })
       .limit(1000);
     if (error) throw new Error(error.message);
