@@ -10,7 +10,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Star, MoreHorizontal, Pencil, Trash2, Eye, EyeOff, ChevronDown } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
@@ -640,6 +640,343 @@ export function AdminUserManagementPanel({
             >
               {deleteMode === "hard" ? "Xoá vĩnh viễn" : "Vô hiệu hoá"}
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+export function AdminClassesPanel({
+  classes,
+  teachers,
+  currentStudentCounts,
+  isPending,
+  createMutation,
+  updateMutation,
+  deleteMutation,
+  onCreateClass,
+  onUpdateClass,
+  onDeleteClass,
+}: {
+  classes: any[];
+  teachers: any[];
+  currentStudentCounts?: Record<string, number>;
+  isPending: boolean;
+  createMutation?: any;
+  updateMutation?: any;
+  deleteMutation?: any;
+  onCreateClass: (payload: any) => void;
+  onUpdateClass: (payload: any) => void;
+  onDeleteClass: (classId: string) => void;
+}) {
+  const [filterText, setFilterText] = useState("");
+  const [editing, setEditing] = useState<any>(null);
+  const [form, setForm] = useState<any>({
+    classId: "",
+    className: "",
+    totalLessons: 15,
+    startDate: "",
+    endDate: "",
+    startTime: "",
+    endTime: "",
+    scheduleDays: [] as number[],
+    maxStudents: 10,
+    teacherId: "",
+    roomLink: "",
+    status: "pending",
+  });
+  const [deleting, setDeleting] = useState<any>(null);
+
+  const DAYS = [
+    { label: "Thứ 2", v: 1 },
+    { label: "Thứ 3", v: 2 },
+    { label: "Thứ 4", v: 3 },
+    { label: "Thứ 5", v: 4 },
+    { label: "Thứ 6", v: 5 },
+    { label: "Thứ 7", v: 6 },
+    { label: "Chủ nhật", v: 0 },
+  ];
+
+  const displayed = (classes ?? []).filter((c: any) => {
+    if (!filterText) return true;
+    const q = filterText.toLowerCase();
+    return (
+      String(c.class_id ?? "").toLowerCase().includes(q) ||
+      String(c.class_name ?? "").toLowerCase().includes(q) ||
+      String(c.teacher_id ?? "").toLowerCase().includes(q)
+    );
+  });
+
+  const startCreate = () => {
+    setEditing(null);
+    setForm({
+      classId: "",
+      className: "",
+      totalLessons: 15,
+      startDate: "",
+      endDate: "",
+      startTime: "",
+      endTime: "",
+      scheduleDays: [],
+      maxStudents: 10,
+      teacherId: "",
+      roomLink: "",
+      status: "pending",
+    });
+  };
+
+  const openEdit = (c: any) => {
+    setEditing(c);
+    setForm({
+      classId: c.class_id,
+      className: c.class_name ?? "",
+      totalLessons: c.total_lessons ?? 15,
+      startDate: c.start_date ?? "",
+      endDate: c.end_date ?? "",
+      startTime: c.start_time ?? "",
+      endTime: c.end_time ?? "",
+      scheduleDays: Array.isArray(c.schedule_days) ? c.schedule_days : [],
+      maxStudents: c.max_students ?? 10,
+      teacherId: c.teacher_id ?? "",
+      roomLink: c.room_link ?? "",
+      status: c.status ?? "pending",
+    });
+  };
+
+  const submit = () => {
+    const payload: any = {
+      classId: form.classId,
+      className: form.className,
+      totalLessons: Number(form.totalLessons) || 15,
+      startDate: form.startDate || undefined,
+      endDate: form.endDate || undefined,
+      startTime: form.startTime || undefined,
+      endTime: form.endTime || undefined,
+      scheduleDays: form.scheduleDays,
+      maxStudents: Number(form.maxStudents) || 10,
+      teacherId: form.teacherId || undefined,
+      roomLink: form.roomLink || undefined,
+      status: form.status,
+    };
+    if (editing) {
+      onUpdateClass({ classId: editing.class_id, updates: {
+        class_name: payload.className,
+        total_lessons: payload.totalLessons,
+        start_date: payload.startDate,
+        end_date: payload.endDate,
+        start_time: payload.startTime,
+        end_time: payload.endTime,
+        schedule_days: payload.scheduleDays,
+        max_students: payload.maxStudents,
+        teacher_id: payload.teacherId,
+        room_link: payload.roomLink,
+        status: payload.status,
+      }});
+    } else {
+      onCreateClass(payload);
+    }
+    // clear only after mutation success (handled in effects below)
+  };
+
+  useEffect(() => {
+    if (createMutation?.isSuccess) {
+      startCreate();
+    }
+  }, [createMutation?.isSuccess]);
+
+  useEffect(() => {
+    if (updateMutation?.isSuccess) {
+      setEditing(null);
+    }
+  }, [updateMutation?.isSuccess]);
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-border bg-card p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="font-display text-lg font-semibold">Tạo / Quản lý lớp học</h3>
+          <div className="flex items-center gap-2">
+            <Input placeholder="Tìm kiếm" value={filterText} onChange={(e) => setFilterText(e.target.value)} />
+            <Button variant="ghost" onClick={startCreate}>Làm mới form</Button>
+          </div>
+        </div>
+
+        { (classes ?? []).length === 0 && (
+          <div className="mb-3 rounded-md bg-muted/5 border border-muted p-3 text-sm text-muted-foreground">Không có dữ liệu lớp học. Nếu bạn vừa tạo lớp mà không thấy gì, kiểm tra bảng `classes` trên Supabase hoặc xem lỗi từ mutation.</div>
+        )}
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label>Mã lớp</Label>
+            <Input placeholder="L-OFF-HSK1-NC-0001" value={form.classId} onChange={(e) => setForm((s:any)=>({...s,classId:e.target.value}))} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Tên lớp</Label>
+            <Input value={form.className} onChange={(e) => setForm((s:any)=>({...s,className:e.target.value}))} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Tổng buổi</Label>
+            <Input type="number" value={String(form.totalLessons)} onChange={(e) => setForm((s:any)=>({...s,totalLessons: Number(e.target.value)}))} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Sĩ số tối đa</Label>
+            <Input type="number" value={String(form.maxStudents)} onChange={(e) => setForm((s:any)=>({...s,maxStudents: Number(e.target.value)}))} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Ngày bắt đầu</Label>
+            <Input type="date" value={form.startDate} onChange={(e) => setForm((s:any)=>({...s,startDate:e.target.value}))} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Ngày kết thúc</Label>
+            <Input type="date" value={form.endDate} onChange={(e) => setForm((s:any)=>({...s,endDate:e.target.value}))} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Giờ bắt đầu</Label>
+            <Input type="time" value={form.startTime} onChange={(e) => setForm((s:any)=>({...s,startTime:e.target.value}))} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Giờ kết thúc</Label>
+            <Input type="time" value={form.endTime} onChange={(e) => setForm((s:any)=>({...s,endTime:e.target.value}))} />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Thứ trong tuần</Label>
+            <div className="flex flex-wrap gap-2">
+              {DAYS.map((d) => (
+                <label key={d.v} className="inline-flex items-center gap-2">
+                  <Checkbox checked={form.scheduleDays?.includes(d.v)} onCheckedChange={() => {
+                    const set = new Set(form.scheduleDays || []);
+                    if (set.has(d.v)) set.delete(d.v); else set.add(d.v);
+                    setForm((s:any)=>({...s,scheduleDays: Array.from(set)}));
+                  }} />
+                  <span className="text-sm">{d.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Giáo viên</Label>
+            <Select value={form.teacherId} onValueChange={(v) => setForm((s:any)=>({...s,teacherId: v === '__none' ? '' : v }))}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none">— Không chọn —</SelectItem>
+                {(teachers ?? []).map((t:any) => {
+                  const id = t.teacher_id ?? t.specific_id ?? t.id ?? "";
+                  if (!id) return null;
+                  return (
+                    <SelectItem key={id} value={id}>{t.full_name ?? id}</SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Room / Link</Label>
+            <Input value={form.roomLink} onChange={(e) => setForm((s:any)=>({...s,roomLink:e.target.value}))} />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Trạng thái</Label>
+            <Select value={form.status} onValueChange={(v) => setForm((s:any)=>({...s,status:v}))}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="pending">pending</SelectItem>
+                <SelectItem value="active">active</SelectItem>
+                <SelectItem value="completed">completed</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <div className="mt-4 flex items-center gap-3">
+          <Button onClick={submit} disabled={isPending}>{editing ? 'Lưu thay đổi' : 'Tạo lớp mới'}</Button>
+          {editing && <Button variant="outline" onClick={startCreate}>Hủy chỉnh sửa</Button>}
+        </div>
+        <div className="mt-3">
+          {createMutation?.isSuccess && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">Tạo lớp thành công.</div>
+          )}
+          {createMutation?.isError && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{(createMutation.error as Error)?.message ?? 'Không thể tạo lớp.'}</div>
+          )}
+          {updateMutation?.isSuccess && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 mt-2">Cập nhật lớp thành công.</div>
+          )}
+          {updateMutation?.isError && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive mt-2">{(updateMutation.error as Error)?.message ?? 'Không thể cập nhật lớp.'}</div>
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-4">
+        <div className="mb-2 flex items-center justify-between">
+          <h4 className="font-medium">Danh sách lớp ({displayed.length})</h4>
+        </div>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Mã</TableHead>
+              <TableHead>Tên lớp</TableHead>
+              <TableHead>Giáo viên</TableHead>
+              <TableHead className="text-center">Số học viên</TableHead>
+              <TableHead>Thứ</TableHead>
+              <TableHead>Trạng thái</TableHead>
+              <TableHead className="text-right">Hành động</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {displayed.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={7} className="text-center text-muted-foreground">Không có lớp học.</TableCell>
+              </TableRow>
+            ) : (
+              displayed.map((c:any) => (
+                <TableRow key={c.class_id}>
+                  <TableCell className="font-mono text-xs">{c.class_id}</TableCell>
+                  <TableCell>{c.class_name}</TableCell>
+                  <TableCell>{(() => {
+                    const id = c.teacher_id;
+                    const t = (teachers ?? []).find((x:any) => x.teacher_id === id || x.specific_id === id || x.id === id);
+                    return t ? (t.full_name ?? id) : (id ?? '—');
+                  })()}</TableCell>
+                  <TableCell className="text-center">{(currentStudentCounts?.[c.class_id] ?? c.current_students ?? 0)}</TableCell>
+                  <TableCell className="text-xs">{(c.schedule_days ?? []).map((d:number)=>DAYS.find(x=>x.v===d)?.label ?? d).join(', ')}</TableCell>
+                  
+                  <TableCell><span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${c.status === 'active' ? 'bg-emerald-100 text-emerald-700' : c.status === 'completed' ? 'bg-muted text-muted-foreground' : 'bg-yellow-100 text-yellow-800'}`}>{c.status}</span></TableCell>
+                  <TableCell className="text-right">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" className="h-8 w-8 p-0"><MoreHorizontal className="h-4 w-4" /></Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => openEdit(c)}><Pencil className="mr-2 h-4 w-4"/> Chỉnh sửa</DropdownMenuItem>
+                        <DropdownMenuItem className="text-destructive" onClick={() => setDeleting(c)}><Trash2 className="mr-2 h-4 w-4"/> Xoá</DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      <AlertDialog open={!!deleting} onOpenChange={(v)=>!v && setDeleting(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Xác nhận xoá lớp</AlertDialogTitle>
+            <AlertDialogDescription>Bạn có chắc muốn xoá lớp {deleting?.class_id} không? Hành động này sẽ xoá hoàn toàn.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Hủy</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground" onClick={() => { if (deleting) onDeleteClass(deleting.class_id); setDeleting(null); }}>Xoá</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -2,8 +2,8 @@ import { useMemo, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { assignStudentToOfflineClass, createCareUser, getAuditLogs, getTeacherAnalytics, getAllUsersAdmin, updateUserAdmin, deleteUserAdmin } from "@/lib/hsk.functions";
-import { AdminAuditLogsPanel, AdminMappingPanel, AdminTeacherAnalyticsPanel, AdminUserManagementPanel } from "./HSK_AdminPanelUi";
+import { assignStudentToOfflineClass, createCareUser, getAuditLogs, getTeacherAnalytics, getAllUsersAdmin, updateUserAdmin, deleteUserAdmin, getAllClassesAdmin, createClassAdmin, updateClassAdmin, deleteClassAdmin } from "@/lib/hsk.functions";
+import { AdminAuditLogsPanel, AdminMappingPanel, AdminTeacherAnalyticsPanel, AdminUserManagementPanel, AdminClassesPanel } from "./HSK_AdminPanelUi";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -94,6 +94,37 @@ export function HSK_AdminPanelView() {
   const auditQuery = useQuery({ queryKey: ["audit"], queryFn: () => auditFn(), enabled: Boolean(!loading && user) });
   const analyticsQuery = useQuery({ queryKey: ["teacher-analytics"], queryFn: () => analyticsFn(), enabled: Boolean(!loading && user) });
 
+  const getAllClassesFn = useServerFn(getAllClassesAdmin);
+  const createClassFn = useServerFn(createClassAdmin);
+  const updateClassFn = useServerFn(updateClassAdmin);
+  const deleteClassFn = useServerFn(deleteClassAdmin);
+
+  const classesQuery = useQuery({ queryKey: ["admin-classes"], queryFn: () => getAllClassesFn(), enabled: Boolean(!loading && user) });
+
+  const createClassMutation = useMutation({
+    mutationFn: (payload: any) => createClassFn({ data: payload }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-classes"] });
+      qc.invalidateQueries({ queryKey: ["audit"] });
+    },
+  });
+
+  const updateClassMutation = useMutation({
+    mutationFn: (payload: any) => updateClassFn({ data: payload }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-classes"] });
+      qc.invalidateQueries({ queryKey: ["audit"] });
+    },
+  });
+
+  const deleteClassMutation = useMutation({
+    mutationFn: (payload: { id: string }) => deleteClassFn({ data: { classId: payload.id } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-classes"] });
+      qc.invalidateQueries({ queryKey: ["audit"] });
+    },
+  });
+
   const handleAssign = async () => {
     await assignFn({ data: { studentId, classId } });
     qc.invalidateQueries({ queryKey: ["audit"] });
@@ -119,6 +150,7 @@ export function HSK_AdminPanelView() {
         <TabsList>
           <TabsTrigger value="mapping">Mapping học viên ↔ lớp</TabsTrigger>
           <TabsTrigger value="teachers">Giáo viên & đánh giá</TabsTrigger>
+          <TabsTrigger value="classes">Tạo lớp học</TabsTrigger>
           <TabsTrigger value="audit">Audit logs</TabsTrigger>
           <TabsTrigger value="create-user">Tạo tài khoản</TabsTrigger>
         </TabsList>
@@ -253,6 +285,19 @@ export function HSK_AdminPanelView() {
                 updateMutation.mutate({ id, status: "disabled" });
               }
             }}
+          />
+        </TabsContent>
+        <TabsContent value="classes" className="mt-6">
+          <AdminClassesPanel
+            classes={classesQuery.data ?? []}
+            teachers={(usersQuery.data ?? []).filter((u: any) => u.role === 'teacher')}
+            isPending={createClassMutation.isPending || updateClassMutation.isPending || deleteClassMutation.isPending}
+            createMutation={createClassMutation}
+            updateMutation={updateClassMutation}
+            deleteMutation={deleteClassMutation}
+            onCreateClass={(payload: any) => createClassMutation.mutate(payload)}
+            onUpdateClass={(payload: any) => updateClassMutation.mutate(payload)}
+            onDeleteClass={(id: string) => deleteClassMutation.mutate({ id })}
           />
         </TabsContent>
       </Tabs>

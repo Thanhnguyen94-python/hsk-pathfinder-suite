@@ -574,6 +574,118 @@ export const createRecurringBookings = createServerFn({ method: "POST" })
     };
   });
 
+// ---------- Classes admin CRUD ----------
+export const getAllClassesAdmin = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    // require admin role first
+    const { data: me, error: meErr } = await supabaseAdmin.from("users").select("role").eq("id", context.userId).maybeSingle();
+    if (meErr) throw new Error(meErr.message);
+    if (!me || me.role !== "admin") throw new Error("Unauthorized");
+    const { data, error } = await supabaseAdmin.from("classes").select("*");
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  });
+
+export const createClassAdmin = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        classId: z.string().min(1).max(100),
+        className: z.string().min(1),
+        totalLessons: z.number().int().min(1).default(15),
+        startDate: z.string().optional(),
+        endDate: z.string().optional(),
+        startTime: z.string().optional(),
+        endTime: z.string().optional(),
+        scheduleDays: z.array(z.number().int().min(0).max(6)).optional(),
+        maxStudents: z.number().int().min(1).default(10),
+        teacherId: z.string().optional(),
+        roomLink: z.string().optional(),
+        status: z.enum(["pending", "active", "completed"]).default("pending"),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: me, error: meErr } = await supabaseAdmin.from("users").select("role").eq("id", context.userId).maybeSingle();
+    if (meErr) throw new Error(meErr.message);
+    if (!me || me.role !== "admin") throw new Error("Unauthorized");
+
+    const payload = {
+      class_id: data.classId,
+      class_name: data.className,
+      total_lessons: data.totalLessons,
+      start_date: data.startDate ?? null,
+      end_date: data.endDate ?? null,
+      start_time: data.startTime ?? null,
+      end_time: data.endTime ?? null,
+      schedule_days: data.scheduleDays ?? null,
+      max_students: data.maxStudents,
+      teacher_id: data.teacherId ?? null,
+      room_link: data.roomLink ?? null,
+      status: data.status,
+    };
+    const { data: row, error } = await supabaseAdmin.from("classes").insert(payload).select().single();
+    if (error) throw new Error(error.message);
+    return row;
+  });
+
+export const updateClassAdmin = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        classId: z.string().min(1).max(100),
+        updates: z.record(z.any()).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: me, error: meErr } = await supabaseAdmin.from("users").select("role").eq("id", context.userId).maybeSingle();
+    if (meErr) throw new Error(meErr.message);
+    if (!me || me.role !== "admin") throw new Error("Unauthorized");
+
+    const updates: any = {};
+    const allowed = [
+      "class_name",
+      "total_lessons",
+      "start_date",
+      "end_date",
+      "start_time",
+      "end_time",
+      "schedule_days",
+      "max_students",
+      "teacher_id",
+      "room_link",
+      "status",
+    ];
+    for (const k of Object.keys(data.updates ?? {})) {
+      if (allowed.includes(k)) updates[k] = (data.updates as any)[k];
+    }
+    const { data: row, error } = await supabaseAdmin
+      .from("classes")
+      .update(updates)
+      .eq("class_id", data.classId)
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return row;
+  });
+
+export const deleteClassAdmin = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) => z.object({ classId: z.string().min(1) }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { data: me, error: meErr } = await supabaseAdmin.from("users").select("role").eq("id", context.userId).maybeSingle();
+    if (meErr) throw new Error(meErr.message);
+    if (!me || me.role !== "admin") throw new Error("Unauthorized");
+
+    const { data: row, error } = await supabaseAdmin.from("classes").delete().eq("class_id", data.classId).select().single();
+    if (error) throw new Error(error.message);
+    return row;
+  });
+
 // ---------- Customer Care directory ----------
 
 export const getCareStudents = createServerFn({ method: "GET" })
