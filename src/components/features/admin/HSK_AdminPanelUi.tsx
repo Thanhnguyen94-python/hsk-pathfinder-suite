@@ -208,7 +208,7 @@ export function AdminAuditLogsPanel({
           </TableHeader>
           <TableBody>
             {logs.map((log, index) => (
-              <TableRow key={`${log.id ?? index}-${log.created_at}`}>
+              <TableRow key={`${log.log_id ?? index}-${log.created_at}`}>
                 <TableCell className="text-xs whitespace-nowrap">
                   {new Date(log.created_at).toLocaleString()}
                 </TableCell>
@@ -286,6 +286,7 @@ export function AdminUserManagementPanel({
   const [editPhone, setEditPhone] = useState("");
   const [editPassword, setEditPassword] = useState("");
   const [showEditPassword, setShowEditPassword] = useState(false);
+  const [editBirthDate, setEditBirthDate] = useState<any>("");
 
   const openEdit = (user: any) => {
     setEditingUser(user);
@@ -294,7 +295,11 @@ export function AdminUserManagementPanel({
     setEditStatus(user.status || "active");
     setEditPhone(user.phone || "");
     setEditPassword("");
-    setEditBirthYear(user.birth_year ?? "");
+    if (user && user.birth_year) {
+      setEditBirthDate(typeof user.birth_year === 'string' ? user.birth_year : `${user.birth_year}-01-01`);
+    } else {
+      setEditBirthDate("");
+    }
     setShowEditPassword(false);
   };
 
@@ -306,16 +311,58 @@ export function AdminUserManagementPanel({
     if (editStatus !== editingUser.status) payload.status = editStatus;
     if (editPhone !== editingUser.phone) payload.phone = editPhone;
     if (editPassword) payload.password = editPassword;
-    if (editBirthYear !== (editingUser.birth_year ?? "")) {
-      const n = Number(editBirthYear);
-      if (!Number.isNaN(n)) payload.birthYear = n;
+    // send full date string when available, otherwise fall back to year
+    if (editBirthDate !== (editingUser.birth_year ? (typeof editingUser.birth_year === 'string' ? editingUser.birth_year : `${editingUser.birth_year}-01-01`) : "")) {
+      if (editBirthDate) {
+        payload.birthDate = editBirthDate;
+      } else {
+        const y = editingUser.birth_year ?? null;
+        if (y !== null && y !== undefined) payload.birthYear = Number(y);
+      }
     }
 
     onUpdateUser(payload);
     setEditingUser(null);
   };
 
-  const [editBirthYear, setEditBirthYear] = useState<any>("");
+  // export displayed users as CSV
+  const exportCsv = () => {
+    const cols = ['specific_id','full_name','email','role','status','phone','birth_year','created_at','updated_at'];
+    const escape = (v: any) => {
+      if (v === null || v === undefined) return '';
+      const s = String(v);
+      return '"' + s.replace(/"/g, '""') + '"';
+    };
+    const formatBirth = (u: any) => {
+      const by = u.birth_year;
+      if (by === null || by === undefined || by === '') return '';
+      if (typeof by === 'string') {
+        const d = new Date(by);
+        if (!Number.isNaN(d.getTime())) {
+          const dd = String(d.getDate()).padStart(2, '0');
+          const mm = String(d.getMonth() + 1).padStart(2, '0');
+          const yyyy = d.getFullYear();
+          return `${dd}/${mm}/${yyyy}`;
+        }
+        return String(by);
+      }
+      return `01/01/${by}`;
+    };
+    const rows = displayedUsers.map((u: any) => cols.map((c) => (c === 'birth_year' ? escape(formatBirth(u)) : escape(u[c] ?? ''))).join(','));
+    const header = cols.map((c) => escape(c)).join(',');
+    const csv = [header, ...rows].join('\n');
+    // prepend UTF-8 BOM so Excel detects UTF-8 with accents correctly
+    const bom = '\uFEFF';
+    const blob = new Blob([bom + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `hsk_users_${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="mt-8 space-y-4">
@@ -326,6 +373,7 @@ export function AdminUserManagementPanel({
             <div className="text-sm text-muted-foreground">Tổng: {displayedUsers.length} / {users.length} tài khoản</div>
             <div className="flex items-center gap-2">
               <Input placeholder="Tìm kiếm" value={filterText} onChange={(e) => setFilterText(e.target.value)} />
+              <Button size="sm" variant="ghost" onClick={exportCsv}>Export</Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" size="sm">
@@ -420,7 +468,26 @@ export function AdminUserManagementPanel({
                             </TableCell>
                           );
                           if (k === 'phone') return <TableCell key={k} className="font-mono text-xs">{u.phone ?? '—'}</TableCell>;
-                          if (k === 'birth_year') return <TableCell key={k} className="text-xs">{u.birth_year ?? '—'}</TableCell>;
+                          if (k === 'birth_year') {
+                            const by = u.birth_year;
+                            let display = '—';
+                            if (by !== null && by !== undefined) {
+                              if (typeof by === 'string') {
+                                const d = new Date(by);
+                                if (!Number.isNaN(d.getTime())) {
+                                  const dd = String(d.getDate()).padStart(2, '0');
+                                  const mm = String(d.getMonth() + 1).padStart(2, '0');
+                                  const yyyy = d.getFullYear();
+                                  display = `${dd}/${mm}/${yyyy}`;
+                                } else {
+                                  display = String(by);
+                                }
+                              } else {
+                                display = `01/01/${by}`;
+                              }
+                            }
+                            return <TableCell key={k} className="text-xs">{display}</TableCell>;
+                          }
                           if (k === 'created_at') return <TableCell key={k} className="text-xs">{u.created_at ? new Date(u.created_at).toLocaleString() : '—'}</TableCell>;
                           if (k === 'updated_at') return <TableCell key={k} className="text-xs">{u.updated_at ? new Date(u.updated_at).toLocaleString() : '—'}</TableCell>;
                           return null;
@@ -511,6 +578,10 @@ export function AdminUserManagementPanel({
                   <SelectItem value="disabled">Disabled</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Ngày sinh</Label>
+              <Input type="date" value={editBirthDate} onChange={(e) => setEditBirthDate(e.target.value)} />
             </div>
             <div className="space-y-1.5 relative">
               <Label>Mật khẩu mới (Bỏ trống nếu không đổi)</Label>

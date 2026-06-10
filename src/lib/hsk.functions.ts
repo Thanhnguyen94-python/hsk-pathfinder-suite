@@ -602,7 +602,8 @@ export const createCareUser = createServerFn({ method: "POST" })
         fullName: z.string().min(1),
         role: z.enum(["student", "teacher", "logistics", "care"]),
         phone: z.string().min(6).max(32),
-        birthYear: z.number().int().min(1900).max(new Date().getFullYear()),
+        birthDate: z.string().optional(),
+        birthYear: z.number().int().min(1900).max(new Date().getFullYear()).optional(),
         status: z.enum(["active", "disabled"]).default("active"),
       })
       .parse(d),
@@ -644,15 +645,58 @@ export const createCareUser = createServerFn({ method: "POST" })
       role: data.role,
     };
     if (data.phone !== undefined) updatePayload.phone = data.phone;
-    if (data.birthYear !== undefined) updatePayload.birth_year = data.birthYear;
+    if (data.birthDate !== undefined) updatePayload.birth_year = data.birthDate;
+    else if (data.birthYear !== undefined) updatePayload.birth_year = data.birthYear;
 
     // Use upsert so we create the public.users row if it doesn't already exist.
-    const { data: userRow, error: upsertErr } = await supabaseAdmin
-      .from("users")
-      .upsert(updatePayload, { onConflict: "id" })
-      .select()
-      .maybeSingle();
-    if (upsertErr) throw new Error(upsertErr.message);
+    // Try upsert; if DB column is DATE and we provided an integer year, retry with YYYY-01-01 string
+    let userRow: any = null;
+    try {
+      const res = await supabaseAdmin.from("users").upsert(updatePayload, { onConflict: "id" }).select().maybeSingle();
+      if (res.error) throw res.error;
+      userRow = res.data;
+    } catch (e) {
+      const msg = (e as any)?.message ?? String(e);
+      // If we sent an integer but DB expects date, retry with YYYY-01-01
+      if (updatePayload.birth_year !== undefined && /invalid input syntax for type date/i.test(msg)) {
+        try {
+          const retryPayload = { ...updatePayload, birth_year: `${updatePayload.birth_year}-01-01` };
+          const res2 = await supabaseAdmin.from("users").upsert(retryPayload, { onConflict: "id" }).select().maybeSingle();
+          if (res2.error) throw res2.error;
+          userRow = res2.data;
+        } catch (e2) {
+          throw new Error((e2 as any)?.message ?? String(e2));
+        }
+      } else if (updatePayload.birth_year !== undefined && /invalid input syntax for type integer/i.test(msg)) {
+        // If we sent a date string but DB expects integer year, extract year and retry
+        try {
+          const by = updatePayload.birth_year;
+          const dt = new Date(String(by));
+          const year = Number.isNaN(dt.getFullYear() as any) ? null : dt.getFullYear();
+          if (year === null || Number.isNaN(year)) throw new Error('Cannot extract year from birth_date');
+          const retryPayload = { ...updatePayload, birth_year: year };
+          const res2 = await supabaseAdmin.from("users").upsert(retryPayload, { onConflict: "id" }).select().maybeSingle();
+          if (res2.error) throw res2.error;
+          userRow = res2.data;
+        } catch (e2) {
+          throw new Error((e2 as any)?.message ?? String(e2));
+        }
+      } else {
+        throw new Error(msg);
+      }
+    }
+    // write audit log
+    try {
+      const { data: adminProfile } = await supabaseAdmin.from("users").select("specific_id").eq("id", context.userId).maybeSingle();
+      await supabaseAdmin.from("audit_logs").insert({
+        action: "create_user",
+        details: { new_user_id: userRow?.id ?? authResult.user.id, email: data.email, role: data.role },
+        user_id: context.userId,
+        user_specific_id: adminProfile?.specific_id ?? null,
+      });
+    } catch (e) {
+      console.warn("Failed to write audit log for createCareUser:", (e as any)?.message ?? e);
+    }
 
     return { specificId: userRow?.specific_id ?? authResult.user.user_metadata?.specific_id ?? null };
   });
@@ -710,13 +754,14 @@ export const updateUserAdmin = createServerFn({ method: "POST" })
         role: z.string().optional(),
         status: z.string().optional(),
         phone: z.string().optional(),
+        birthDate: z.string().optional(),
         birthYear: z.number().int().optional(),
         password: z.string().min(6).optional(),
       })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { id, fullName, role, status, phone, birthYear, password } = data;
+    const { id, fullName, role, status, phone, birthDate, birthYear, password } = data;
 
     // Update auth metadata and/or password via service client when available
     try {
@@ -748,7 +793,8 @@ export const updateUserAdmin = createServerFn({ method: "POST" })
     if (role !== undefined) updatePayload.role = role;
     if (status !== undefined) updatePayload.status = status;
     if (phone !== undefined) updatePayload.phone = phone;
-    if (birthYear !== undefined) updatePayload.birth_year = birthYear;
+    if (birthDate !== undefined) updatePayload.birth_year = birthDate;
+    else if (birthYear !== undefined) updatePayload.birth_year = birthYear;
 
     if (Object.keys(updatePayload).length === 0) return { ok: true };
 
@@ -761,13 +807,53 @@ export const updateUserAdmin = createServerFn({ method: "POST" })
     if (meErr) throw new Error(meErr.message);
     if (!meRow || meRow.role !== 'admin') throw new Error('Forbidden');
 
-    const { data: row, error } = await supabaseAdmin
-      .from("users")
-      .update(updatePayload)
-      .eq("id", id)
-      .select()
-      .maybeSingle();
-    if (error) throw new Error(error.message);
+    // Try update; if column is DATE and birth_year is integer, retry using a YYYY-01-01 string
+    let row: any = null;
+    try {
+      const res = await supabaseAdmin.from("users").update(updatePayload).eq("id", id).select().maybeSingle();
+      if (res.error) throw res.error;
+      row = res.data;
+    } catch (e) {
+      const msg = (e as any)?.message ?? String(e);
+      if (updatePayload.birth_year !== undefined && /invalid input syntax for type date/i.test(msg)) {
+        try {
+          const retryPayload = { ...updatePayload, birth_year: `${updatePayload.birth_year}-01-01` };
+          const res2 = await supabaseAdmin.from("users").update(retryPayload).eq("id", id).select().maybeSingle();
+          if (res2.error) throw res2.error;
+          row = res2.data;
+        } catch (e2) {
+          throw new Error((e2 as any)?.message ?? String(e2));
+        }
+      } else if (updatePayload.birth_year !== undefined && /invalid input syntax for type integer/i.test(msg)) {
+        try {
+          const by = updatePayload.birth_year;
+          const dt = new Date(String(by));
+          const year = Number.isNaN(dt.getFullYear() as any) ? null : dt.getFullYear();
+          if (year === null || Number.isNaN(year)) throw new Error('Cannot extract year from birth_date');
+          const retryPayload = { ...updatePayload, birth_year: year };
+          const res2 = await supabaseAdmin.from("users").update(retryPayload).eq("id", id).select().maybeSingle();
+          if (res2.error) throw res2.error;
+          row = res2.data;
+        } catch (e2) {
+          throw new Error((e2 as any)?.message ?? String(e2));
+        }
+      } else {
+        throw new Error(msg);
+      }
+    }
+    // audit log
+    try {
+      const { data: adminProfile } = await supabaseAdmin.from("users").select("specific_id").eq("id", context.userId).maybeSingle();
+      await supabaseAdmin.from("audit_logs").insert({
+        action: "update_user",
+        details: { target_id: id, changes: updatePayload },
+        user_id: context.userId,
+        user_specific_id: adminProfile?.specific_id ?? null,
+      });
+    } catch (e) {
+      console.warn("Failed to write audit log for updateUserAdmin:", (e as any)?.message ?? e);
+    }
+
     return row ?? { ok: true };
   });
 
@@ -793,6 +879,19 @@ export const deleteUserAdmin = createServerFn({ method: "POST" })
 
     const { error } = await context.supabase.from("users").delete().eq("id", id);
     if (error) throw new Error(error.message);
+    // audit log for deletion
+    try {
+      const { data: adminProfile } = await supabaseAdmin.from("users").select("specific_id").eq("id", context.userId).maybeSingle();
+      await supabaseAdmin.from("audit_logs").insert({
+        action: "delete_user",
+        details: { target_id: id },
+        user_id: context.userId,
+        user_specific_id: adminProfile?.specific_id ?? null,
+      });
+    } catch (e) {
+      console.warn("Failed to write audit log for deleteUserAdmin:", (e as any)?.message ?? e);
+    }
+
     return { ok: true };
   });
 

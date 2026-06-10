@@ -27,7 +27,7 @@ export function HSK_AdminPanelView() {
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<"student" | "teacher" | "logistics" | "care">("student");
   const [phone, setPhone] = useState("");
-  const [birthYear, setBirthYear] = useState("");
+  const [birthDate, setBirthDate] = useState("");
   const [status, setStatus] = useState<"active" | "disabled">("active");
   const [showPassword, setShowPassword] = useState(false);
 
@@ -40,12 +40,18 @@ export function HSK_AdminPanelView() {
 
   const updateMutation = useMutation({
     mutationFn: (payload: any) => updateUserFn({ data: payload }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-users"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+      qc.invalidateQueries({ queryKey: ["audit"] });
+    },
   });
 
   const deleteMutation = useMutation({
     mutationFn: (payload: { id: string }) => deleteUserFn({ data: payload }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-users"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+      qc.invalidateQueries({ queryKey: ["audit"] });
+    },
   });
   const createUserMutation = useMutation({
     mutationFn: (payload: {
@@ -54,7 +60,8 @@ export function HSK_AdminPanelView() {
       fullName: string;
       role: "student" | "teacher" | "logistics" | "care";
       phone: string;
-      birthYear: number;
+      birthDate?: string;
+      birthYear?: number;
       status: "active" | "disabled";
     }) => createUserFn({ data: payload }),
     onSuccess: () => {
@@ -63,24 +70,25 @@ export function HSK_AdminPanelView() {
       setPassword("");
       setRole("student");
       setPhone("");
-      setBirthYear("");
+      setBirthDate("");
       setStatus("active");
       qc.invalidateQueries({ queryKey: ["admin-users"] });
+      qc.invalidateQueries({ queryKey: ["audit"] });
     },
   });
 
-  const birthYearNumber = Number(birthYear);
+  const birthYearNumber = birthDate ? new Date(birthDate).getFullYear() : NaN;
   const isCreateFormValid =
     Boolean(fullName.trim()) &&
     Boolean(email.trim()) &&
     Boolean(password) &&
     Boolean(phone.trim()) &&
-    Boolean(birthYear) &&
+    Boolean(birthDate) &&
     !Number.isNaN(birthYearNumber) &&
     birthYearNumber >= 1900 &&
     birthYearNumber <= new Date().getFullYear();
 
-  const hasInput = Boolean(fullName || email || password || phone || birthYear);
+  const hasInput = Boolean(fullName || email || password || phone || birthDate);
   const showValidationError = !isCreateFormValid && hasInput && !createUserMutation.isSuccess;
 
   const auditQuery = useQuery({ queryKey: ["audit"], queryFn: () => auditFn(), enabled: Boolean(!loading && user) });
@@ -178,13 +186,11 @@ export function HSK_AdminPanelView() {
                 <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
               </div>
               <div className="space-y-1.5">
-                <Label>Năm sinh</Label>
+                <Label>Ngày sinh</Label>
                 <Input
-                  type="number"
-                  min={1900}
-                  max={new Date().getFullYear()}
-                  value={birthYear}
-                  onChange={(e) => setBirthYear(e.target.value)}
+                  type="date"
+                  value={birthDate}
+                  onChange={(e) => setBirthDate(e.target.value)}
                 />
               </div>
               <div className="space-y-1.5">
@@ -209,7 +215,8 @@ export function HSK_AdminPanelView() {
                     password,
                     role,
                     phone: phone.trim(),
-                    birthYear: birthYearNumber,
+                    birthDate: birthDate || undefined,
+                    birthYear: Number.isNaN(birthYearNumber) ? undefined : birthYearNumber,
                     status,
                   })
                 }
