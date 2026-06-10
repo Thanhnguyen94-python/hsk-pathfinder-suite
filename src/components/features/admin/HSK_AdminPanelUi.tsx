@@ -377,7 +377,7 @@ export function AdminUserManagementPanel({
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" size="sm">
-                    Cột <ChevronDown className="ml-2 h-4 w-4" />
+                    Xem cột <ChevronDown className="ml-2 h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
@@ -687,6 +687,25 @@ export function AdminClassesPanel({
     status: "pending",
   });
   const [deleting, setDeleting] = useState<any>(null);
+  const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
+    class_id: true,
+    class_name: true,
+    teacher_id: true,
+    current_students: true,
+    schedule_days: true,
+    total_lessons: false,
+    start_date: false,
+    end_date: false,
+    start_time: false,
+    end_time: false,
+    max_students: false,
+    room_link: false,
+    status: true,
+    created_at: false,
+    updated_at: false,
+  });
+  const toggleColumn = (k: string) => setVisibleColumns((s) => ({ ...s, [k]: !s[k] }));
+  const [searchColumn, setSearchColumn] = useState<string>('all');
 
   const DAYS = [
     { label: "Thứ 2", v: 1 },
@@ -701,11 +720,30 @@ export function AdminClassesPanel({
   const displayed = (classes ?? []).filter((c: any) => {
     if (!filterText) return true;
     const q = filterText.toLowerCase();
-    return (
-      String(c.class_id ?? "").toLowerCase().includes(q) ||
-      String(c.class_name ?? "").toLowerCase().includes(q) ||
-      String(c.teacher_id ?? "").toLowerCase().includes(q)
-    );
+    const match = (v: any) => String(v ?? '').toLowerCase().includes(q);
+    // helper to find teacher by id
+    const findTeacher = () => (teachers ?? []).find((x: any) => x.teacher_id === c.teacher_id || x.specific_id === c.teacher_id || x.id === c.teacher_id);
+
+    if (searchColumn === 'all') {
+      if (match(c.class_id) || match(c.class_name) || match(c.teacher_id) || match(currentStudentCounts?.[c.class_id] ?? c.current_students) || match(c.total_lessons) || match(c.start_date) || match(c.end_date) || match(c.start_time) || match(c.end_time) || match(c.max_students) || match(c.room_link) || match(c.status)) return true;
+      // schedule days labels
+      if (Array.isArray(c.schedule_days) && (c.schedule_days ?? []).some((d: number) => String(DAYS.find(x => x.v === d)?.label ?? d).toLowerCase().includes(q))) return true;
+      const t = findTeacher();
+      if (t && match(t.full_name)) return true;
+      return false;
+    }
+
+    if (searchColumn === 'teacher_id') {
+      const t = findTeacher();
+      return match(c.teacher_id) || (t && match(t.full_name));
+    }
+
+    if (searchColumn === 'schedule_days') {
+      return Array.isArray(c.schedule_days) && (c.schedule_days ?? []).some((d: number) => String(DAYS.find(x => x.v === d)?.label ?? d).toLowerCase().includes(q));
+    }
+
+    // generic column search
+    return match((c as any)[searchColumn]);
   });
 
   const startCreate = () => {
@@ -795,10 +833,10 @@ export function AdminClassesPanel({
     <div className="space-y-4">
       <div className="rounded-xl border border-border bg-card p-4">
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="font-display text-lg font-semibold">Tạo / Quản lý lớp học</h3>
+          <h3 className="font-display text-lg font-semibold">Tạo lớp học</h3>
           <div className="flex items-center gap-2">
             <Input placeholder="Tìm kiếm" value={filterText} onChange={(e) => setFilterText(e.target.value)} />
-            <Button variant="ghost" onClick={startCreate}>Làm mới form</Button>
+            <Button variant="ghost" onClick={startCreate}>Làm mới DS</Button>
           </div>
         </div>
 
@@ -916,56 +954,171 @@ export function AdminClassesPanel({
       </div>
 
       <div className="rounded-xl border border-border bg-card p-4">
-        <div className="mb-2 flex items-center justify-between">
+        <div className="mb-3 flex items-center justify-between">
           <h4 className="font-medium">Danh sách lớp ({displayed.length})</h4>
+          <div className="flex items-center gap-3">
+            <div className="text-sm text-muted-foreground">Tổng: {displayed.length} / {(classes ?? []).length}</div>
+            <div className="flex items-center gap-2">
+              <Input placeholder="Tìm kiếm" value={filterText} onChange={(e) => setFilterText(e.target.value)} />
+              <Button size="sm" variant="ghost" onClick={() => {
+                // export CSV
+                const cols = ['class_id','class_name','teacher_id','current_students','schedule_days','total_lessons','start_date','end_date','start_time','end_time','max_students','room_link','status','created_at','updated_at'];
+                const escape = (v: any) => {
+                  if (v === null || v === undefined) return '';
+                  const s = String(v);
+                  return '"' + s.replace(/"/g, '""') + '"';
+                };
+                const formatSchedule = (sd: any) => {
+                  if (!sd) return '';
+                  try {
+                    return (sd ?? []).map((d: number) => DAYS.find(x => x.v === d)?.label ?? d).join('; ');
+                  } catch { return String(sd); }
+                };
+                const formatDate = (v: any) => {
+                  if (!v) return '';
+                  const d = new Date(v);
+                  if (!Number.isNaN(d.getTime())) return d.toLocaleString();
+                  return String(v);
+                };
+                const rows = displayed.map((c:any) => cols.map((k) => {
+                  if (k === 'schedule_days') return escape(formatSchedule(c.schedule_days));
+                  if (k === 'current_students') return escape(currentStudentCounts?.[c.class_id] ?? c.current_students ?? 0);
+                  if (k === 'start_date' || k === 'end_date' || k === 'created_at' || k === 'updated_at') return escape(formatDate(c[k]));
+                  return escape(c[k] ?? '');
+                }).join(','));
+                const header = ['class_id','class_name','teacher_id','current_students','schedule_days','total_lessons','start_date','end_date','start_time','end_time','max_students','room_link','status','created_at','updated_at'].map((h)=>escape(h)).join(',');
+                const csv = [header, ...rows].join('\n');
+                const bom = '\uFEFF';
+                const blob = new Blob([bom + csv], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `hsk_classes_${new Date().toISOString().slice(0,10)}.csv`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+              }}>Export</Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    Xem cột <ChevronDown className="ml-2 h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <div className="p-2">
+                    {[
+                      { key: 'class_id', label: 'Mã lớp' },
+                      { key: 'class_name', label: 'Tên lớp' },
+                      { key: 'teacher_id', label: 'Giáo viên' },
+                      { key: 'current_students', label: 'Số học viên' },
+                      { key: 'schedule_days', label: 'Thứ' },
+                      { key: 'total_lessons', label: 'Tổng buổi' },
+                      { key: 'start_date', label: 'Ngày bắt đầu' },
+                      { key: 'end_date', label: 'Ngày kết thúc' },
+                      { key: 'start_time', label: 'Giờ bắt đầu' },
+                      { key: 'end_time', label: 'Giờ kết thúc' },
+                      { key: 'max_students', label: 'Sĩ số tối đa' },
+                      { key: 'room_link', label: 'Room / Link' },
+                      { key: 'status', label: 'Trạng thái' },
+                      { key: 'created_at', label: 'Tạo lúc' },
+                      { key: 'updated_at', label: 'Cập nhật lúc' },
+                    ].map((c) => (
+                      <label
+                        key={c.key}
+                        className="flex items-center gap-2 px-2 py-1"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Checkbox checked={!!visibleColumns[c.key]} onCheckedChange={() => toggleColumn(c.key)} />
+                        <span className="text-sm">{c.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
         </div>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Mã</TableHead>
-              <TableHead>Tên lớp</TableHead>
-              <TableHead>Giáo viên</TableHead>
-              <TableHead className="text-center">Số học viên</TableHead>
-              <TableHead>Thứ</TableHead>
-              <TableHead>Trạng thái</TableHead>
-              <TableHead className="text-right">Hành động</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {displayed.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">Không có lớp học.</TableCell>
-              </TableRow>
-            ) : (
-              displayed.map((c:any) => (
-                <TableRow key={c.class_id}>
-                  <TableCell className="font-mono text-xs">{c.class_id}</TableCell>
-                  <TableCell>{c.class_name}</TableCell>
-                  <TableCell>{(() => {
-                    const id = c.teacher_id;
-                    const t = (teachers ?? []).find((x:any) => x.teacher_id === id || x.specific_id === id || x.id === id);
-                    return t ? (t.full_name ?? id) : (id ?? '—');
-                  })()}</TableCell>
-                  <TableCell className="text-center">{(currentStudentCounts?.[c.class_id] ?? c.current_students ?? 0)}</TableCell>
-                  <TableCell className="text-xs">{(c.schedule_days ?? []).map((d:number)=>DAYS.find(x=>x.v===d)?.label ?? d).join(', ')}</TableCell>
-                  
-                  <TableCell><span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${c.status === 'active' ? 'bg-emerald-100 text-emerald-700' : c.status === 'completed' ? 'bg-muted text-muted-foreground' : 'bg-yellow-100 text-yellow-800'}`}>{c.status}</span></TableCell>
-                  <TableCell className="text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" className="h-8 w-8 p-0"><MoreHorizontal className="h-4 w-4" /></Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => openEdit(c)}><Pencil className="mr-2 h-4 w-4"/> Chỉnh sửa</DropdownMenuItem>
-                        <DropdownMenuItem className="text-destructive" onClick={() => setDeleting(c)}><Trash2 className="mr-2 h-4 w-4"/> Xoá</DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
+
+        {(() => {
+          const colOrder = ['class_id','class_name','teacher_id','current_students','schedule_days','total_lessons','start_date','end_date','start_time','end_time','max_students','room_link','status','created_at','updated_at'];
+          const labels: Record<string,string> = {
+            class_id: 'Mã',
+            class_name: 'Tên lớp',
+            teacher_id: 'Giáo viên',
+            current_students: 'Số học viên',
+            schedule_days: 'Thứ',
+            total_lessons: 'Tổng buổi',
+            start_date: 'Ngày bắt đầu',
+            end_date: 'Ngày kết thúc',
+            start_time: 'Giờ bắt đầu',
+            end_time: 'Giờ kết thúc',
+            max_students: 'Sĩ số tối đa',
+            room_link: 'Room / Link',
+            status: 'Trạng thái',
+            created_at: 'Tạo lúc',
+            updated_at: 'Cập nhật lúc',
+          };
+          const visibleKeys = colOrder.filter((k) => visibleColumns[k]);
+          const visibleCount = visibleKeys.length;
+          return (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  {colOrder.map((k) => visibleColumns[k] ? (<TableHead key={k}>{labels[k]}</TableHead>) : null)}
+                  <TableHead className="text-right">Hành động</TableHead>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+              </TableHeader>
+              <TableBody>
+                {displayed.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={visibleCount + 1} className="text-center text-muted-foreground">Không có lớp học.</TableCell>
+                  </TableRow>
+                ) : (
+                  displayed.map((c:any) => (
+                    <TableRow key={c.class_id}>
+                      {colOrder.map((k) => {
+                        if (!visibleColumns[k]) return null;
+                        if (k === 'class_id') return <TableCell key={k} className="font-mono text-xs">{c.class_id}</TableCell>;
+                        if (k === 'class_name') return <TableCell key={k}>{c.class_name}</TableCell>;
+                        if (k === 'teacher_id') return <TableCell key={k}>{(() => {
+                          const id = c.teacher_id;
+                          const t = (teachers ?? []).find((x:any) => x.teacher_id === id || x.specific_id === id || x.id === id);
+                          return t ? (t.full_name ?? id) : (id ?? '—');
+                        })()}</TableCell>;
+                        if (k === 'current_students') return <TableCell key={k} className="text-center">{(currentStudentCounts?.[c.class_id] ?? c.current_students ?? 0)}</TableCell>;
+                        if (k === 'schedule_days') return <TableCell key={k} className="text-xs">{(c.schedule_days ?? []).map((d:number)=>DAYS.find(x=>x.v===d)?.label ?? d).join(', ')}</TableCell>;
+                        if (k === 'total_lessons') return <TableCell key={k} className="text-xs">{c.total_lessons ?? '—'}</TableCell>;
+                        if (k === 'start_date') return <TableCell key={k} className="text-xs">{c.start_date ? new Date(c.start_date).toLocaleDateString() : '—'}</TableCell>;
+                        if (k === 'end_date') return <TableCell key={k} className="text-xs">{c.end_date ? new Date(c.end_date).toLocaleDateString() : '—'}</TableCell>;
+                        if (k === 'start_time') return <TableCell key={k} className="text-xs">{c.start_time ?? '—'}</TableCell>;
+                        if (k === 'end_time') return <TableCell key={k} className="text-xs">{c.end_time ?? '—'}</TableCell>;
+                        if (k === 'max_students') return <TableCell key={k} className="text-xs">{c.max_students ?? '—'}</TableCell>;
+                        if (k === 'room_link') return <TableCell key={k} className="text-xs">{c.room_link ? <a href={c.room_link} target="_blank" rel="noreferrer" className="text-primary underline">Link</a> : '—'}</TableCell>;
+                        if (k === 'status') return <TableCell key={k}><span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${c.status === 'active' ? 'bg-emerald-100 text-emerald-700' : c.status === 'completed' ? 'bg-muted text-muted-foreground' : 'bg-yellow-100 text-yellow-800'}`}>{c.status}</span></TableCell>;
+                        if (k === 'created_at') return <TableCell key={k} className="text-xs">{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</TableCell>;
+                        if (k === 'updated_at') return <TableCell key={k} className="text-xs">{c.updated_at ? new Date(c.updated_at).toLocaleString() : '—'}</TableCell>;
+                        return null;
+                      })}
+                      <TableCell className="text-right">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" className="h-8 w-8 p-0"><MoreHorizontal className="h-4 w-4" /></Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => openEdit(c)}><Pencil className="mr-2 h-4 w-4"/> Chỉnh sửa</DropdownMenuItem>
+                            <DropdownMenuItem className="text-destructive" onClick={() => setDeleting(c)}><Trash2 className="mr-2 h-4 w-4"/> Xoá</DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          );
+        })()}
       </div>
 
       <AlertDialog open={!!deleting} onOpenChange={(v)=>!v && setDeleting(null)}>
