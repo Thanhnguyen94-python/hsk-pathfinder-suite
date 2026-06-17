@@ -10,7 +10,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Star, MoreHorizontal, Pencil, Trash2, Eye, EyeOff, ChevronDown } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
@@ -45,6 +45,15 @@ export function AdminMappingPanel({
   onClassIdChange,
   onAssign,
   isSubmitDisabled,
+  getClassDetails,
+  getStudentEnrollments,
+  getClasses,
+  getClassEnrollments,
+  onAddStudentToClass,
+  onRemoveStudentFromClass,
+  getStudentSuggestions,
+  onUpdateClass,
+  teachers,
 }: {
   studentId: string;
   classId: string;
@@ -52,37 +61,551 @@ export function AdminMappingPanel({
   onClassIdChange: (value: string) => void;
   onAssign: () => void;
   isSubmitDisabled: boolean;
+  // optional helpers (provided by caller or can be left undefined)
+  getClassDetails?: (classId: string) => Promise<any>;
+  getStudentEnrollments?: (studentId: string) => Promise<any[]>;
+  getClasses?: () => Promise<any[]>;
+  getClassEnrollments?: (classId: string) => Promise<any[]>;
+  onAddStudentToClass?: (classId: string, studentId: string) => Promise<any>;
+  onRemoveStudentFromClass?: (classId: string, studentId: string) => Promise<any>;
+  getStudentSuggestions?: (q: string) => Promise<any[]>;
+  onUpdateClass?: (classId: string, updates: Record<string, any>) => Promise<any>;
+  teachers?: any[];
 }) {
+  const [classDetails, setClassDetails] = useState<any | null>(null);
+  const [studentEnrollments, setStudentEnrollments] = useState<any[] | null>(null);
+  const [loadingClass, setLoadingClass] = useState(false);
+  const [loadingStudent, setLoadingStudent] = useState(false);
+  const [localErrors, setLocalErrors] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!classId || !getClassDetails) {
+      setClassDetails(null);
+      return;
+    }
+    setLoadingClass(true);
+    getClassDetails(classId)
+      .then((d) => {
+        if (!cancelled) setClassDetails(d ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setClassDetails(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingClass(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [classId, getClassDetails]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!studentId || !getStudentEnrollments) {
+      setStudentEnrollments(null);
+      return;
+    }
+    setLoadingStudent(true);
+    getStudentEnrollments(studentId)
+      .then((r) => {
+        if (!cancelled) setStudentEnrollments(r ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setStudentEnrollments([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingStudent(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [studentId, getStudentEnrollments]);
+
+  // simple helpers
+  const timeToMinutes = (t?: string) => {
+    if (!t) return null;
+    const [hh, mm] = t.split(":");
+    const h = Number(hh ?? 0);
+    const m = Number(mm ?? 0);
+    if (Number.isNaN(h) || Number.isNaN(m)) return null;
+    return h * 60 + m;
+  };
+
+  useEffect(() => {
+    const errs: string[] = [];
+    if (classDetails) {
+      const cur = Number(classDetails.current_students ?? classDetails.current_students_count ?? 0);
+      const max = Number(classDetails.max_students ?? classDetails.max_students ?? 0);
+      if (max && cur >= max) errs.push("Lớp đã đầy");
+      if (classDetails.status && classDetails.status !== "active") errs.push(`Lớp không ở trạng thái 'active' (trạng thái: ${classDetails.status})`);
+    }
+    if (studentEnrollments && classDetails) {
+      // duplicate check
+      if (studentEnrollments.some((e) => (e.class_id ?? e.classId) === (classDetails.class_id ?? classDetails.classId))) {
+        errs.push("Học viên đã được ghi danh vào lớp này");
+      }
+      // schedule naive overlap: check weekday intersection + time overlap when schedule_days and start_time/end_time exist
+      try {
+        const aDays = Array.isArray(classDetails?.schedule_days) ? classDetails.schedule_days : [];
+        const aStart = timeToMinutes(classDetails?.start_time);
+        const aEnd = timeToMinutes(classDetails?.end_time);
+        if (aDays.length && (aStart !== null && aEnd !== null)) {
+          for (const en of studentEnrollments) {
+            const bDays = Array.isArray(en?.schedule_days) ? en.schedule_days : [];
+            const overlapDay = aDays.some((d: number) => bDays.includes(d));
+            if (!overlapDay) continue;
+            const bStart = timeToMinutes(en?.start_time);
+            const bEnd = timeToMinutes(en?.end_time);
+            if (bStart === null || bEnd === null) continue;
+            if (Math.max(aStart, bStart) < Math.min(aEnd, bEnd)) {
+              errs.push(`Xung đột lịch với lớp ${en.class_id ?? en.classId}`);
+              break;
+            }
+          }
+        }
+      } catch (e) {
+        // ignore schedule parse errors
+      }
+    }
+    setLocalErrors(errs);
+  }, [classDetails, studentEnrollments]);
+
+  const localIsDisabled = localErrors.length > 0;
+
+  // class roster panel state
+  const [classesList, setClassesList] = useState<any[] | null>(null);
+  const [loadingClassesList, setLoadingClassesList] = useState(false);
+  const [selectedClass, setSelectedClass] = useState<any | null>(null);
+  const [selectedEnrollments, setSelectedEnrollments] = useState<any[] | null>(null);
+  const [loadingEnrollments, setLoadingEnrollments] = useState(false);
+  const [actionPending, setActionPending] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [teacherEdit, setTeacherEdit] = useState<string>('');
+  const [teacherSuggestions, setTeacherSuggestions] = useState<any[] | null>(null);
+  const [teacherSuggestionsVisible, setTeacherSuggestionsVisible] = useState(false);
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [addStudentCode, setAddStudentCode] = useState('');
+
+  // suggestions
+  const [classSuggestionsVisible, setClassSuggestionsVisible] = useState(false);
+  const [filteredClassSuggestions, setFilteredClassSuggestions] = useState<any[]>([]);
+  const [studentSuggestions, setStudentSuggestions] = useState<any[] | null>(null);
+  const [studentSuggestionsLoading, setStudentSuggestionsLoading] = useState(false);
+  const studentDebounceRef = useRef<number | null>(null);
+
+  // immediate fetch helper for student suggestions (used on focus)
+  const fetchStudentSuggestionsNow = async (q?: string) => {
+    if (!getStudentSuggestions) return;
+    setStudentSuggestionsLoading(true);
+    try {
+      const res = await getStudentSuggestions(String(q ?? studentId ?? '').trim());
+      setStudentSuggestions(res ?? []);
+    } catch (e) {
+      setStudentSuggestions([]);
+    } finally {
+      setStudentSuggestionsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!getClasses) return;
+    setLoadingClassesList(true);
+    getClasses()
+      .then((r: any) => { if (!cancelled) setClassesList(r ?? []); })
+      .catch(() => { if (!cancelled) setClassesList([]); })
+      .finally(() => { if (!cancelled) setLoadingClassesList(false); });
+    return () => { cancelled = true; };
+  }, [getClasses]);
+
+  // when a Class ID is typed, try to open that class and load its enrollments
+  useEffect(() => {
+    if (!classId) return;
+    const found = (classesList ?? []).find((c:any) => String(c.class_id ?? c.classId).toLowerCase() === String(classId).toLowerCase());
+    if (found) {
+      openClass(found);
+      return;
+    }
+    if (getClassEnrollments) {
+      const minimal = { class_id: classId, class_name: null };
+      setSelectedClass(minimal);
+      setSelectedEnrollments(null);
+      setLoadingEnrollments(true);
+      getClassEnrollments(classId)
+        .then((r: any) => setSelectedEnrollments(r ?? []))
+        .catch(() => setSelectedEnrollments([]))
+        .finally(() => setLoadingEnrollments(false));
+    }
+  }, [classId, classesList, getClassEnrollments]);
+
+  // update class suggestions when classesList or classId changes
+  useEffect(() => {
+    if (!classesList) return setFilteredClassSuggestions([]);
+    // filter classes according to requirement: show active OR not full OR missing teacher
+    const visibleClasses = (classesList ?? []).filter((c:any) => {
+      const status = c.status ?? '';
+      const cur = Number(c.current_students ?? c.current_students_count ?? 0);
+      const max = Number(c.max_students ?? c.max_students ?? 0) || 0;
+      const hasTeacher = Boolean(c.teacher_id ?? c.teacherId ?? c.teacher_staff_code ?? c.teacher_staffCode);
+      const notFull = !max || cur < max;
+      return status === 'active' || notFull || !hasTeacher;
+    });
+    const q = String(classId ?? '').trim().toLowerCase();
+    if (!q) {
+      setFilteredClassSuggestions(visibleClasses.slice(0, 10));
+      return;
+    }
+    const filtered = visibleClasses.filter((c:any) => (String(c.class_id ?? '').toLowerCase().includes(q) || String(c.class_name ?? '').toLowerCase().includes(q))).slice(0, 10);
+    setFilteredClassSuggestions(filtered);
+  }, [classesList, classId]);
+
+  const openClass = (c: any) => {
+    // toggle collapse if already open
+    if (selectedClass?.class_id === (c.class_id ?? c.classId)) {
+      setSelectedClass(null);
+      setSelectedEnrollments(null);
+      return;
+    }
+    setSelectedClass(c);
+    setSelectedEnrollments(null);
+    if (!getClassEnrollments) return;
+    setLoadingEnrollments(true);
+    getClassEnrollments(c.class_id ?? c.classId)
+      .then((r: any) => setSelectedEnrollments(r ?? []))
+      .catch(() => setSelectedEnrollments([]))
+      .finally(() => setLoadingEnrollments(false));
+    // close class suggestions when opening
+    setClassSuggestionsVisible(false);
+  };
+  // add student by staff_code (UI passes staff_code, parent resolves to id)
+  const handleAddStudent = async (classIdToUse?: string, staffCode?: string) => {
+    if (!onAddStudentToClass) return;
+    const cid = classIdToUse ?? (selectedClass?.class_id ?? selectedClass?.classId ?? classId);
+    const code = staffCode ?? addStudentCode ?? studentId;
+    if (!cid || !code) return setActionError('Cần `Class ID` và `Mã nhân viên`.');
+    setActionPending(true); setActionError(null);
+    try {
+      await onAddStudentToClass(cid, code);
+      // refresh lists
+      if (getClasses) setLoadingClassesList(true);
+      if (getClasses) getClasses().then((r: any)=>setClassesList(r ?? [])).finally(()=>setLoadingClassesList(false));
+      if (selectedClass) openClass(selectedClass);
+      setAddDialogOpen(false);
+      setAddStudentCode('');
+    } catch (e: any) {
+      setActionError((e && e.message) ? e.message : 'Không thể thêm học viên.');
+    } finally { setActionPending(false); }
+  };
+
+  const handleRemoveStudent = async (sid: string) => {
+    if (!onRemoveStudentFromClass || !selectedClass) return;
+    setActionPending(true); setActionError(null);
+    try {
+      await onRemoveStudentFromClass(selectedClass.class_id ?? selectedClass.classId, sid);
+      openClass(selectedClass);
+      if (getClasses) { setLoadingClassesList(true); await getClasses().then((r: any)=>setClassesList(r ?? [])).finally(()=>setLoadingClassesList(false)); }
+    } catch (e: any) {
+      setActionError((e && e.message) ? e.message : 'Không thể xoá học viên.');
+    } finally { setActionPending(false); }
+  };
+
+  // update teacher for selectedClass
+  const handleUpdateTeacher = async () => {
+    if (!onUpdateClass || !selectedClass) return setActionError('Không có lớp để cập nhật.');
+    const cid = selectedClass.class_id ?? selectedClass.classId ?? classId;
+    if (!cid) return setActionError('Cần mã lớp.');
+    setActionPending(true); setActionError(null);
+    try {
+      await onUpdateClass(cid, { teacher_id: teacherEdit });
+      // refresh class list and enrollments without toggling collapse
+      // refresh classes list
+      if (getClasses) { setLoadingClassesList(true); const all = await getClasses().then((r:any)=>r ?? []).catch(()=>[]).finally(()=>setLoadingClassesList(false)); setClassesList(all);
+        // try to update selectedClass from fresh data
+        const found = (all ?? []).find((x:any) => String(x.class_id ?? x.classId) === String(cid));
+        if (found) setSelectedClass(found);
+      }
+
+      // also try getClassDetails if available (preferred) to populate latest fields
+      if (getClassDetails) {
+        try {
+          const det = await getClassDetails(cid);
+          if (det) setSelectedClass(det);
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      if (getClassEnrollments) {
+        setLoadingEnrollments(true);
+        await getClassEnrollments(cid)
+          .then((r:any)=>setSelectedEnrollments(r ?? []))
+          .catch(()=>setSelectedEnrollments([]))
+          .finally(()=>setLoadingEnrollments(false));
+      }
+    } catch (e: any) {
+      setActionError((e && e.message) ? e.message : 'Không thể cập nhật giáo viên.');
+    } finally { setActionPending(false); }
+  };
+
+  // student suggestions: debounce and call getStudentSuggestions if provided
+  useEffect(() => {
+    if (studentDebounceRef.current) window.clearTimeout(studentDebounceRef.current);
+    if (!getStudentSuggestions) return;
+    const q = String(studentId ?? '').trim();
+    if (!q) {
+      setStudentSuggestions(null);
+      setStudentSuggestionsLoading(false);
+      return;
+    }
+    setStudentSuggestionsLoading(true);
+    studentDebounceRef.current = window.setTimeout(() => {
+      getStudentSuggestions(q).then((res: any) => {
+        setStudentSuggestions(res ?? []);
+      }).catch(() => setStudentSuggestions([])).finally(() => setStudentSuggestionsLoading(false));
+    }, 300);
+    return () => { if (studentDebounceRef.current) window.clearTimeout(studentDebounceRef.current); };
+  }, [studentId, getStudentSuggestions]);
+
+  // also support suggestions while typing in the add-student dialog
+  useEffect(() => {
+    if (!getStudentSuggestions) return;
+    const q = String(addStudentCode ?? '').trim();
+    if (!q) {
+      // don't clear existing suggestions aggressively when dialog empty
+      return;
+    }
+    const handle = window.setTimeout(async () => {
+      setStudentSuggestionsLoading(true);
+      try {
+        const res = (await getStudentSuggestions(q)) ?? [];
+        // sort results so exact/starts-with staff_code matches first, then name matches
+        const ql = q.toLowerCase();
+        res.sort((a: any, b: any) => {
+          const aCode = String(a.staff_code ?? a.specific_id ?? a.id ?? '').toLowerCase();
+          const bCode = String(b.staff_code ?? b.specific_id ?? b.id ?? '').toLowerCase();
+          const aName = String(a.full_name ?? a.student_name ?? '').toLowerCase();
+          const bName = String(b.full_name ?? b.student_name ?? '').toLowerCase();
+          const aScore = (aCode === ql ? 100 : aCode.startsWith(ql) ? 90 : (aCode.includes(ql) ? 50 : 0)) + (aName.includes(ql) ? 10 : 0);
+          const bScore = (bCode === ql ? 100 : bCode.startsWith(ql) ? 90 : (bCode.includes(ql) ? 50 : 0)) + (bName.includes(ql) ? 10 : 0);
+          return bScore - aScore;
+        });
+        setStudentSuggestions(res);
+      } catch (e) {
+        setStudentSuggestions([]);
+      } finally {
+        setStudentSuggestionsLoading(false);
+      }
+    }, 200);
+    return () => clearTimeout(handle);
+  }, [addStudentCode, getStudentSuggestions]);
+
+  // teacher suggestions based on `teachers` prop and teacherEdit input
+  useEffect(() => {
+    if (!teachers) return setTeacherSuggestions(null);
+    const q = String(teacherEdit ?? '').trim().toLowerCase();
+    if (!q) {
+      setTeacherSuggestions(null);
+      return;
+    }
+    const filtered = (teachers ?? []).filter((t:any) => {
+      const sc = String(t.staff_code ?? t.staffCode ?? t.specific_id ?? '').toLowerCase();
+      const name = String(t.full_name ?? t.fullName ?? '').toLowerCase();
+      return sc.includes(q) || name.includes(q);
+    }).slice(0, 10);
+    setTeacherSuggestions(filtered);
+  }, [teacherEdit, teachers]);
+
+  // when selectedClass changes, prefill teacher edit input
+  useEffect(() => {
+    if (!selectedClass) {
+      setTeacherEdit('');
+      return;
+    }
+    // try to show teacher staff_code for readability if available via teachers prop
+    const tid = selectedClass.teacher_id ?? selectedClass.teacherId ?? '';
+    if (tid && teachers && Array.isArray(teachers)) {
+      const t = teachers.find((x:any) => String(x.id) === String(tid) || String(x.specific_id ?? x.specificId) === String(tid) || String(x.teacher_id) === String(tid));
+      setTeacherEdit(t ? (t.staff_code ?? t.staffCode ?? (t.specific_id ?? t.specificId ?? t.id)) : String(tid));
+    } else {
+      setTeacherEdit(selectedClass.teacher_staff_code ?? selectedClass.teacher_code ?? selectedClass.teacher_id ?? selectedClass.teacherId ?? '');
+    }
+  }, [selectedClass]);
+
+  // compute classes to display: active OR not full OR missing teacher
+  const displayClasses = (classesList ?? []).filter((c:any) => {
+    const status = c.status ?? '';
+    const cur = Number(c.current_students ?? c.current_students_count ?? 0);
+    const max = Number(c.max_students ?? c.max_students ?? 0) || 0;
+    const hasTeacher = Boolean(c.teacher_id ?? c.teacherId ?? c.teacher_staff_code ?? c.teacher_staffCode);
+    const notFull = !max || cur < max;
+    return status === 'active' || notFull || !hasTeacher;
+  });
+
   return (
     <div className="rounded-xl border border-border bg-card p-5">
-      <h3 className="mb-4 font-display text-base font-semibold">Gán học viên vào lớp offline</h3>
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="space-y-1.5">
-          <Label>Student ID</Label>
-          <Input
-            placeholder="HV-26-XXXX"
-            value={studentId}
-            onChange={(e) => onStudentIdChange(e.target.value)}
-            className="w-56 font-mono"
-          />
+      {/* Removed direct mapping inputs; only show class list & roster */}
+
+      {/* local inline errors/warnings */}
+      {localErrors.length > 0 && (
+        <div className="mt-3 space-y-1">
+          {localErrors.map((err, i) => (
+            <div key={i} className={err.includes('Xung đột') ? 'text-sm text-yellow-800' : 'text-sm text-destructive'}>{err}</div>
+          ))}
         </div>
-        <div className="space-y-1.5">
-          <Label>Class ID</Label>
-          <Input
-            placeholder="L-OFF-XXXX"
-            value={classId}
-            onChange={(e) => onClassIdChange(e.target.value)}
-            className="w-64 font-mono"
-          />
+      )}
+
+      {/* Classes roster panel */}
+      <div className="mt-6 rounded-xl border border-border bg-card p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h4 className="font-medium">Quản lý danh sách & sĩ số lớp học</h4>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="ghost" onClick={() => { if (getClasses) { setLoadingClassesList(true); getClasses().then((r: any)=>setClassesList(r ?? [])).finally(()=>setLoadingClassesList(false)); } }}>Refresh</Button>
+          </div>
+          {/* class suggestions dropdown */}
+          {classSuggestionsVisible && filteredClassSuggestions.length > 0 && (
+            <div className="absolute z-40 mt-1 w-64 max-h-56 overflow-auto rounded-md border bg-popover p-1">
+              {filteredClassSuggestions.map((s:any) => (
+                <div key={s.class_id} className="cursor-pointer px-2 py-1 hover:bg-muted" onMouseDown={() => { onClassIdChange(s.class_id); setClassSuggestionsVisible(false); openClass(s); }}>{s.class_id} — {s.class_name ?? ''}</div>
+              ))}
+            </div>
+          )}
         </div>
-        <Button onClick={onAssign} disabled={isSubmitDisabled}>
-          Gán vào lớp
-        </Button>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Mã</TableHead>
+                <TableHead>Tên lớp</TableHead>
+                <TableHead className="text-center">Sĩ số</TableHead>
+                <TableHead>Thứ / Giờ</TableHead>
+                <TableHead>Trạng thái</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loadingClassesList ? (
+                <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">Đang tải...</TableCell></TableRow>
+              ) : displayClasses.length === 0 ? (
+                <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">Không có lớp.</TableCell></TableRow>
+              ) : (
+                displayClasses.map((c:any) => {
+                  const cur = Number(c.current_students ?? c.current_students_count ?? 0);
+                  const max = Number(c.max_students ?? 0) || null;
+                  const pct = max ? (cur / max) : 0;
+                  const badgeClass = pct >= 1 ? 'bg-destructive text-destructive-foreground' : pct >= 0.8 ? 'bg-yellow-100 text-yellow-800' : 'bg-emerald-100 text-emerald-700';
+                  return (
+                    <TableRow key={c.class_id} onClick={() => openClass(c)} className={selectedClass?.class_id === c.class_id ? 'bg-muted/5' : ''}>
+                      <TableCell className="font-mono text-xs">{c.class_id}</TableCell>
+                      <TableCell>{c.class_name ?? '—'}</TableCell>
+                      <TableCell className="text-center"><span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${badgeClass}`}>{cur}{max ? `/${max}` : ''}</span></TableCell>
+                      <TableCell className="text-xs">{(c.schedule_days ?? []).join(', ')} {c.start_time ? `— ${c.start_time}` : ''}</TableCell>
+                      <TableCell><span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${c.status === 'active' ? 'bg-emerald-100 text-emerald-700' : c.status === 'completed' ? 'bg-muted text-muted-foreground' : 'bg-yellow-100 text-yellow-800'}`}>{c.status}</span></TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </div>
+
+        {/* selected class enrollments */}
+        <div className="mt-4">
+          {selectedClass ? (
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <div className="font-medium">Thông tin lớp: {selectedClass.class_id}</div>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" onClick={() => setAddDialogOpen(true)} disabled={actionPending || (selectedClass.max_students && (Number(selectedClass.current_students ?? 0) >= Number(selectedClass.max_students)))}>Thêm học viên</Button>
+                </div>
+              </div>
+              <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-3 items-center">
+                <div className="text-sm text-muted-foreground">Giáo viên hiện tại</div>
+                <div className="font-medium sm:col-span-2">{(() => {
+                  if (!selectedClass) return '—';
+                  const tid = selectedClass.teacher_id ?? selectedClass.teacherId ?? '';
+                  let t: any = null;
+                  if (teachers && Array.isArray(teachers) && tid) {
+                    t = teachers.find((x: any) => String(x.id) === String(tid) || String(x.specific_id ?? x.specificId ?? '') === String(tid) || String(x.staff_code ?? x.staffCode ?? '') === String(tid));
+                  }
+                  const name = t?.full_name ?? selectedClass.teacher_name ?? '';
+                  const staff = t?.staff_code ?? selectedClass.teacher_staff_code ?? selectedClass.teacher_code ?? '';
+                  if (name && staff) return `${name} — ${staff}`;
+                  if (name) return `${name}${staff ? ` — ${staff}` : ''}`;
+                  if (staff) return `${staff}${tid && staff !== tid ? ` — ${tid}` : ''}`;
+                  return tid || '—';
+                })()}</div>
+                <div className="text-sm text-muted-foreground">Thay đổi giáo viên (Mã giáo viên)</div>
+                <div className="sm:col-span-2 flex items-center gap-2">
+                  <div className="relative">
+                    <Input value={teacherEdit} onChange={(e) => { setTeacherEdit(e.target.value); setTeacherSuggestionsVisible(true); }} onFocus={() => setTeacherSuggestionsVisible(true)} className="w-56 font-mono" />
+                    {teacherSuggestionsVisible && teacherSuggestions && teacherSuggestions.length > 0 && (
+                      <div className="absolute z-40 mt-1 w-56 max-h-40 overflow-auto rounded-md border bg-popover p-1">
+                        {teacherSuggestions.map((t:any) => (
+                          <div key={t.staff_code ?? t.specific_id ?? t.id} className="cursor-pointer px-2 py-1 hover:bg-muted" onMouseDown={() => { setTeacherEdit(t.staff_code ?? t.specific_id ?? t.id); setTeacherSuggestions(null); setTeacherSuggestionsVisible(false); }}>{(t.staff_code ?? t.specific_id ?? t.id)} — {t.full_name}</div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <Button size="sm" onClick={handleUpdateTeacher} disabled={actionPending || !teacherEdit}>Cập nhật</Button>
+                </div>
+              </div>
+              {loadingEnrollments ? (
+                <div className="text-sm text-muted-foreground">Đang tải học viên...</div>
+              ) : (selectedEnrollments ?? []).length === 0 ? (
+                <div className="text-sm text-muted-foreground">Chưa có học viên.</div>
+              ) : (
+                <div className="space-y-2">
+                  {(selectedEnrollments ?? []).map((s:any) => (
+                    <div key={s.student_id ?? s.specific_id ?? s.id ?? s.staff_code} className="flex items-center justify-between rounded-md border p-2">
+                      <div>
+                        <div className="font-medium">{s.full_name ?? s.student_name ?? '—'}</div>
+                        <div className="font-mono text-xs text-muted-foreground">{s.staff_code ?? s.student_id ?? s.specific_id ?? s.id}</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button size="sm" variant="ghost" className="text-destructive" onClick={() => handleRemoveStudent(s.staff_code ?? s.student_id ?? s.specific_id ?? s.id)} disabled={actionPending}>Xoá</Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {actionError && <div className="mt-3 text-sm text-destructive">{actionError}</div>}
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground">Chọn một lớp để xem học viên.</div>
+          )}
+        </div>
       </div>
+      {/* Add student dialog */}
+      <Dialog open={addDialogOpen} onOpenChange={(v) => setAddDialogOpen(v)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Thêm học viên vào lớp {selectedClass?.class_id ?? ''}</DialogTitle>
+            <DialogDescription>Nhập mã học viên để thêm vào lớp.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label>Mã học viên</Label>
+              <Input value={addStudentCode} onChange={(e) => setAddStudentCode(e.target.value)} onFocus={() => fetchStudentSuggestionsNow(addStudentCode)} className="font-mono" placeholder="ST-0001" />
+              {studentSuggestionsLoading && <div className="text-xs text-muted-foreground">Đang tìm...</div>}
+              {studentSuggestions && studentSuggestions.length > 0 && (
+                <div className="mt-1 max-h-40 overflow-auto rounded-md border bg-popover p-1">
+                  {studentSuggestions.map((s:any) => (
+                    <div key={s.staff_code ?? s.specific_id ?? s.id} className="cursor-pointer px-2 py-1 hover:bg-muted" onMouseDown={() => { setAddStudentCode(s.staff_code ?? s.specific_id ?? s.id); setStudentSuggestions(null); }}>{(s.staff_code ?? s.specific_id ?? s.id)} — {s.full_name ?? s.student_name ?? ''}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => { setAddDialogOpen(false); setAddStudentCode(''); }}>Huỷ</Button>
+              <Button onClick={() => handleAddStudent(selectedClass?.class_id, addStudentCode)} disabled={actionPending || !addStudentCode}>Thêm</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
-
+///tạo panel chứa danh sách lớp
 export function AdminTeacherAnalyticsPanel({
   teachers,
   ratings,
@@ -241,7 +764,8 @@ export function AdminUserManagementPanel({
   isPending: boolean;
 }) {
   const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
-    specific_id: true,
+    specific_id: false,
+    staff_code: true,
     full_name: true,
     email: true,
     role: true,
@@ -265,6 +789,7 @@ export function AdminUserManagementPanel({
         String(u.full_name ?? "").toLowerCase().includes(q) ||
         String(u.email ?? "").toLowerCase().includes(q) ||
         String(u.specific_id ?? "").toLowerCase().includes(q) ||
+        String(u.staff_code ?? "").toLowerCase().includes(q) ||
         String(u.phone ?? "").toLowerCase().includes(q)
       );
     })
@@ -327,7 +852,7 @@ export function AdminUserManagementPanel({
 
   // export displayed users as CSV
   const exportCsv = () => {
-    const cols = ['specific_id','full_name','email','role','status','phone','birth_year','created_at','updated_at'];
+    const cols = ['specific_id','staff_code','full_name','email','role','status','phone','birth_year','created_at','updated_at'];
     const escape = (v: any) => {
       if (v === null || v === undefined) return '';
       const s = String(v);
@@ -384,6 +909,7 @@ export function AdminUserManagementPanel({
                   <div className="p-2">
                     {[
                       { key: 'specific_id', label: 'Specific ID' },
+                      { key: 'staff_code', label: 'Mã nhân viên' },
                       { key: 'full_name', label: 'Họ tên' },
                       { key: 'email', label: 'Email' },
                       { key: 'role', label: 'Vai trò' },
@@ -411,8 +937,9 @@ export function AdminUserManagementPanel({
         </div>
         <div className="overflow-x-auto">
           {(() => {
-            const colOrder = ['specific_id','full_name','email','role','status','phone','birth_year','created_at','updated_at'];
+            const colOrder = ['staff_code','specific_id','full_name','email','role','status','phone','birth_year','created_at','updated_at'];
             const labels: Record<string,string> = {
+              staff_code: 'Mã nhân viên',
               specific_id: 'Specific ID',
               full_name: 'Họ tên',
               email: 'Email',
@@ -425,7 +952,7 @@ export function AdminUserManagementPanel({
             };
             const visibleKeys = colOrder.filter((k) => visibleColumns[k]);
             const visibleCount = visibleKeys.length;
-            const supportsSort = new Set(['specific_id','full_name','email','role','status','birth_year','created_at','updated_at']);
+            const supportsSort = new Set(['specific_id','staff_code','full_name','email','role','status','birth_year','created_at','updated_at']);
             return (
               <Table>
                 <TableHeader>
@@ -457,6 +984,7 @@ export function AdminUserManagementPanel({
                         {colOrder.map((k) => {
                           if (!visibleColumns[k]) return null;
                           if (k === 'specific_id') return <TableCell key={k} className="font-mono text-xs">{u.specific_id}</TableCell>;
+                          if (k === 'staff_code') return <TableCell key={k} className="font-mono text-xs">{u.staff_code ?? '—'}</TableCell>;
                           if (k === 'full_name') return <TableCell key={k} className="font-medium">{u.full_name}</TableCell>;
                           if (k === 'email') return <TableCell key={k}>{u.email}</TableCell>;
                           if (k === 'role') return <TableCell key={k} className="capitalize">{u.role}</TableCell>;
@@ -1087,7 +1615,14 @@ export function AdminClassesPanel({
                           const t = (teachers ?? []).find((x:any) => x.teacher_id === id || x.specific_id === id || x.id === id);
                           return t ? (t.full_name ?? id) : (id ?? '—');
                         })()}</TableCell>;
-                        if (k === 'current_students') return <TableCell key={k} className="text-center">{(currentStudentCounts?.[c.class_id] ?? c.current_students ?? 0)}</TableCell>;
+                        if (k === 'current_students') {
+                          const cur = Number(currentStudentCounts?.[c.class_id] ?? c.current_students ?? 0);
+                          const max = Number(c.max_students ?? 0) || null;
+                          if (!max) return <TableCell key={k} className="text-center">{cur}</TableCell>;
+                          const pct = cur / max;
+                          const badgeClass = pct >= 1 ? 'bg-destructive text-destructive-foreground' : pct >= 0.8 ? 'bg-yellow-100 text-yellow-800' : 'bg-emerald-100 text-emerald-700';
+                          return <TableCell key={k} className="text-center"><span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${badgeClass}`}>{cur}/{max}</span></TableCell>;
+                        }
                         if (k === 'schedule_days') return <TableCell key={k} className="text-xs">{(c.schedule_days ?? []).map((d:number)=>DAYS.find(x=>x.v===d)?.label ?? d).join(', ')}</TableCell>;
                         if (k === 'total_lessons') return <TableCell key={k} className="text-xs">{c.total_lessons ?? '—'}</TableCell>;
                         if (k === 'start_date') return <TableCell key={k} className="text-xs">{c.start_date ? new Date(c.start_date).toLocaleDateString() : '—'}</TableCell>;

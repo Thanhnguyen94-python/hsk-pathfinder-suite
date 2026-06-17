@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { assignStudentToOfflineClass, createCareUser, getAuditLogs, getTeacherAnalytics, getAllUsersAdmin, updateUserAdmin, deleteUserAdmin, getAllClassesAdmin, createClassAdmin, updateClassAdmin, deleteClassAdmin } from "@/lib/hsk.functions";
+import { assignStudentToOfflineClass, createCareUser, getAuditLogs, getTeacherAnalytics, getAllUsersAdmin, updateUserAdmin, deleteUserAdmin, getAllClassesAdmin, createClassAdmin, updateClassAdmin, deleteClassAdmin, getClassDetailsAdmin, getClassEnrollmentsAdmin, getStudentEnrollmentsAdmin, getStudentSuggestionsAdmin, removeStudentFromClassAdmin } from "@/lib/hsk.functions";
 import { AdminAuditLogsPanel, AdminMappingPanel, AdminTeacherAnalyticsPanel, AdminUserManagementPanel, AdminClassesPanel } from "./HSK_AdminPanelUi";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Eye, EyeOff } from "lucide-react";
@@ -18,6 +18,11 @@ export function HSK_AdminPanelView() {
   const assignFn = useServerFn(assignStudentToOfflineClass);
   const auditFn = useServerFn(getAuditLogs);
   const analyticsFn = useServerFn(getTeacherAnalytics);
+  const getClassDetailsFn = useServerFn(getClassDetailsAdmin);
+  const getClassEnrollmentsFn = useServerFn(getClassEnrollmentsAdmin);
+  const getStudentEnrollmentsFn = useServerFn(getStudentEnrollmentsAdmin);
+  const getStudentSuggestionsFn = useServerFn(getStudentSuggestionsAdmin);
+  const removeStudentFn = useServerFn(removeStudentFromClassAdmin);
 
   const [studentId, setStudentId] = useState("");
   const [classId, setClassId] = useState("");
@@ -37,6 +42,24 @@ export function HSK_AdminPanelView() {
   const deleteUserFn = useServerFn(deleteUserAdmin);
 
   const usersQuery = useQuery({ queryKey: ["admin-users"], queryFn: () => getAllUsersFn(), enabled: Boolean(!loading && user) });
+
+  // helper to resolve a staff_code (or fallback identifiers) to the actual user id/specific_id
+  const resolveUserIdFromCode = (code?: string) => {
+    if (!code) return null;
+    const users = (usersQuery.data ?? []) as any[];
+    const c = String(code).trim();
+    if (!c) return null;
+    const found = users.find((u) => {
+      const sc = String(u.staff_code ?? u.staffCode ?? "");
+      const sid = String(u.specific_id ?? u.specificId ?? "");
+      const authId = String(u.id ?? "");
+      return sc === c || sid === c || authId === c;
+    });
+    // Prefer returning the public.specific_id (canonical student/teacher id used in
+    // the `classes`/`class_enrollments` relationships). Fall back to auth `id` only
+    // when `specific_id` is not available.
+    return found ? (found.specific_id ?? found.specificId ?? found.id ?? null) : null;
+  };
 
   const updateMutation = useMutation({
     mutationFn: (payload: any) => updateUserFn({ data: payload }),
@@ -63,6 +86,7 @@ export function HSK_AdminPanelView() {
       birthDate?: string;
       birthYear?: number;
       status: "active" | "disabled";
+      staff_code?: string;
     }) => createUserFn({ data: payload }),
     onSuccess: () => {
       setFullName("");
@@ -90,6 +114,30 @@ export function HSK_AdminPanelView() {
 
   const hasInput = Boolean(fullName || email || password || phone || birthDate);
   const showValidationError = !isCreateFormValid && hasInput && !createUserMutation.isSuccess;
+
+  // helper to generate next staff_code based on existing users
+  const rolePrefix: Record<string, string> = {
+    student: 'ST',
+    teacher: 'TC',
+    logistics: 'LG',
+    care: 'CR',
+    admin: 'AD',
+  };
+  const nextStaffCodeForRole = (r: typeof role) => {
+    const prefix = rolePrefix[r] ?? 'ST';
+    const users = (usersQuery.data ?? []) as any[];
+    let max = 0;
+    for (const u of users) {
+      const sc = String(u.staff_code ?? u.staffCode ?? '');
+      const m = sc.match(new RegExp(`^${prefix}-(\\d+)$`));
+      if (m) {
+        const n = Number(m[1]);
+        if (!Number.isNaN(n) && n > max) max = n;
+      }
+    }
+    const next = String(max + 1).padStart(4, '0');
+    return `${prefix}-${next}`;
+  };
 
   const auditQuery = useQuery({ queryKey: ["audit"], queryFn: () => auditFn(), enabled: Boolean(!loading && user) });
   const analyticsQuery = useQuery({ queryKey: ["teacher-analytics"], queryFn: () => analyticsFn(), enabled: Boolean(!loading && user) });
@@ -148,11 +196,11 @@ export function HSK_AdminPanelView() {
       </div>
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
-          <TabsTrigger value="mapping">Mapping học viên ↔ lớp</TabsTrigger>
-          <TabsTrigger value="teachers">Giáo viên & đánh giá</TabsTrigger>
-          <TabsTrigger value="classes">Tạo lớp học</TabsTrigger>
-          <TabsTrigger value="audit">Audit logs</TabsTrigger>
+          <TabsTrigger value="mapping">Sắp xếp lớp</TabsTrigger>
           <TabsTrigger value="create-user">Tạo tài khoản</TabsTrigger>
+          <TabsTrigger value="classes">Tạo lớp học</TabsTrigger>
+          <TabsTrigger value="teachers">Giáo viên & đánh giá</TabsTrigger>
+          <TabsTrigger value="audit">Audit logs</TabsTrigger>
         </TabsList>
         <TabsContent value="mapping" className="mt-6">
           <AdminMappingPanel
@@ -162,6 +210,38 @@ export function HSK_AdminPanelView() {
             onClassIdChange={setClassId}
             onAssign={handleAssign}
             isSubmitDisabled={!studentId || !classId}
+            getClassDetails={(cid: string) => getClassDetailsFn({ data: { classId: cid } })}
+            // AdminMappingPanel will pass staff_code (Mã nhân viên) as the student identifier.
+            // Resolve it here to the actual user id expected by server functions.
+            getStudentEnrollments={(sid: string) => {
+              const uid = resolveUserIdFromCode(sid);
+              if (!uid) return Promise.resolve([]);
+              return getStudentEnrollmentsFn({ data: { studentId: uid } });
+            }}
+            getClasses={() => getAllClassesFn()}
+            getClassEnrollments={(cid: string) => getClassEnrollmentsFn({ data: { classId: cid } })}
+            // when AdminMappingPanel asks to add/remove by staff_code, resolve to actual id
+            onAddStudentToClass={(cid: string, sid: string) => {
+              const uid = resolveUserIdFromCode(sid);
+              if (!uid) return Promise.reject(new Error('Không tìm thấy học viên với mã nhân viên đã nhập'));
+              return assignFn({ data: { studentId: uid, classId: cid } });
+            }}
+            onRemoveStudentFromClass={(cid: string, sid: string) => {
+              const uid = resolveUserIdFromCode(sid);
+              if (!uid) return Promise.reject(new Error('Không tìm thấy học viên với mã nhân viên đã nhập'));
+              return removeStudentFn({ data: { classId: cid, studentId: uid } });
+            }}
+            getStudentSuggestions={(q: string) => getStudentSuggestionsFn({ data: { q } })}
+            // when updating class teacher, accept staff_code and resolve to actual id if present
+            onUpdateClass={(cid: string, updates: Record<string, any>) => {
+              const up = { ...updates } as Record<string, any>;
+              if (up.teacher_id) {
+                const uid = resolveUserIdFromCode(up.teacher_id);
+                up.teacher_id = uid ?? up.teacher_id;
+              }
+              return updateClassFn({ data: { classId: cid, updates: up } });
+            }}
+            teachers={(usersQuery.data ?? []).filter((u: any) => u.role === 'teacher')}
           />
         </TabsContent>
         <TabsContent value="teachers" className="mt-6">
@@ -242,15 +322,16 @@ export function HSK_AdminPanelView() {
               <Button
                 onClick={() =>
                   createUserMutation.mutate({
-                    fullName,
-                    email,
-                    password,
-                    role,
-                    phone: phone.trim(),
-                    birthDate: birthDate || undefined,
-                    birthYear: Number.isNaN(birthYearNumber) ? undefined : birthYearNumber,
-                    status,
-                  })
+                        fullName,
+                        email,
+                        password,
+                        role,
+                        phone: phone.trim(),
+                        birthDate: birthDate || undefined,
+                        birthYear: Number.isNaN(birthYearNumber) ? undefined : birthYearNumber,
+                        status,
+                        staff_code: nextStaffCodeForRole(role),
+                      })
                 }
                 disabled={createUserMutation.isPending || !isCreateFormValid}
               >

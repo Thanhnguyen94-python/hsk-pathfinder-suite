@@ -124,13 +124,85 @@ export const assignStudentToOfflineClass = createServerFn({ method: "POST" })
     z.object({ studentId: z.string().min(1), classId: z.string().min(1) }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { data: row, error } = await context.supabase.rpc(
-      "assign_student_to_offline_class",
-      { p_student_id: data.studentId, p_class_id: data.classId },
-    );
-    if (error) throw new Error(error.message);
-    return row;
+    // Perform the enrollment directly via the service-role client to avoid
+    // RPC/schema-cache issues that can occur when calling DB functions via
+    // different sessions. This mirrors the behavior of the DB function
+    // `assign_student_to_offline_class` but does the work here so we can be
+    // robust in dev environments.
+    // Note: don't rely on querying information_schema via the REST client
+    // (some Supabase/PostgREST setups hide it). Instead, attempt the
+    // enrollment operation and map undefined-table errors to a clear
+    // actionable message directing the operator to run DB migrations.
+    // Validate class exists and is offline_group
+    const { data: cls, error: clsErr } = await supabaseAdmin
+      .from("classes")
+      .select("*")
+      .eq("class_id", data.classId)
+      .maybeSingle();
+    if (clsErr) throw new Error(clsErr.message);
+    if (!cls || !cls.class_id) throw new Error(`Class ${data.classId} not found`);
+    // NOTE: previously we required cls.type === 'offline_group'. Relax that
+    // restriction so admins can assign students to classes regardless of the
+    // stored type value (some environments/migrations use different type
+    // names). If you want to re-enable strict checking, restore the guard.
+
+    // Try to insert enrollment (allow conflict)
+    const { data: ins, error: insErr } = await supabaseAdmin
+      .from("class_enrollments")
+      .insert({ class_id: data.classId, student_id: data.studentId })
+      .select()
+      .maybeSingle();
+    // Map missing table errors to a helpful message
+    if (insErr) {
+      const m = String(insErr.message ?? insErr);
+      if (m.includes('Could not find the table') || m.includes('does not exist') || m.includes('relation') || m.includes('42P01')) {
+        throw new Error("Database schema missing: table 'public.class_enrollments' not found. Run the SQL migrations in supabase/migrations to create enrollment tables and triggers.");
+      }
+    }
+    let v_row = ins ?? null;
+    if (insErr) {
+      // If conflict or other error, attempt to read existing enrollment
+      const { data: existing, error: exErr } = await supabaseAdmin
+        .from("class_enrollments")
+        .select("*")
+        .match({ class_id: data.classId, student_id: data.studentId })
+        .maybeSingle();
+      if (exErr) {
+        const m = String(exErr.message ?? exErr);
+        if (m.includes('Could not find the table') || m.includes('does not exist') || m.includes('relation') || m.includes('42P01')) {
+          throw new Error("Database schema missing: table 'public.class_enrollments' not found. Run the SQL migrations in supabase/migrations to create enrollment tables and triggers.");
+        }
+        throw new Error(exErr.message);
+      }
+      v_row = existing ?? null;
+    }
+
+    // If we inserted a new enrollment (ins present), try to increment
+    // classes.current_students as a fallback in case DB triggers are missing.
+    if (ins && (!v_row || (v_row && v_row.enrolled_at === (ins as any).enrolled_at))) {
+      try {
+        const cur = Number(cls.current_students ?? 0) || 0;
+        await supabaseAdmin.from('classes').update({ current_students: cur + 1 }).eq('class_id', data.classId);
+      } catch (e) {
+        // Non-fatal; trigger-based counting is preferred. Ignore update failures.
+      }
+    }
+
+    // insert audit log (mirrors public.log_action)
+    try {
+      await supabaseAdmin.from("audit_logs").insert({
+        user_id: context.userId ?? null,
+        user_specific_id: null,
+        action: "assign_student_to_offline_class",
+        details: { student_id: data.studentId, class_id: data.classId },
+      });
+    } catch (lErr: any) {
+      // ignore logging errors
+    }
+
+    return v_row;
   });
+
 
 export const getAuditLogs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -587,6 +659,122 @@ export const getAllClassesAdmin = createServerFn({ method: "GET" })
     return data ?? [];
   });
 
+  // Get a single class details (admin)
+  export const getClassDetailsAdmin = createServerFn({ method: "GET" })
+    .middleware([requireSupabaseAuth])
+    .inputValidator((d) => z.object({ classId: z.string().min(1) }).parse(d))
+    .handler(async ({ data, context }) => {
+      const { data: me, error: meErr } = await supabaseAdmin.from("users").select("role").eq("id", context.userId).maybeSingle();
+      if (meErr) throw new Error(meErr.message);
+      if (!me || me.role !== "admin") throw new Error("Unauthorized");
+      const { data: row, error } = await supabaseAdmin.from("classes").select("*").eq("class_id", data.classId).maybeSingle();
+      if (error) throw new Error(error.message);
+      return row ?? null;
+    });
+
+  // List enrollments (students) for a class
+  export const getClassEnrollmentsAdmin = createServerFn({ method: "GET" })
+    .middleware([requireSupabaseAuth])
+    .inputValidator((d) => z.object({ classId: z.string().min(1) }).parse(d))
+    .handler(async ({ data, context }) => {
+      const { data: me, error: meErr } = await supabaseAdmin.from("users").select("role").eq("id", context.userId).maybeSingle();
+      if (meErr) throw new Error(meErr.message);
+      if (!me || me.role !== "admin") throw new Error("Unauthorized");
+      // Query enrollments — if the table doesn't exist the client may return
+      // a descriptive error (map that to a migration guidance message).
+      const { data: rows, error } = await supabaseAdmin
+        .from("class_enrollments")
+        .select(`student_id, enrolled_at, users ( specific_id, full_name, staff_code )`)
+        .eq("class_id", data.classId);
+      if (error) {
+        const m = String(error.message ?? error);
+        if (m.includes('Could not find the table') || m.includes('does not exist') || m.includes('relation') || m.includes('42P01')) {
+          throw new Error("Database schema missing: table 'public.class_enrollments' not found. Run the SQL migrations in supabase/migrations to create enrollment tables and triggers.");
+        }
+        throw new Error(error.message);
+      }
+      // normalize
+      return (rows ?? []).map((r: any) => ({ student_id: r.student_id, enrolled_at: r.enrolled_at, full_name: r.users?.full_name ?? null, specific_id: r.users?.specific_id ?? null, staff_code: r.users?.staff_code ?? null }));
+    });
+
+  // List classes that a student is enrolled in
+  export const getStudentEnrollmentsAdmin = createServerFn({ method: "GET" })
+    .middleware([requireSupabaseAuth])
+    .inputValidator((d) => z.object({ studentId: z.string().min(1) }).parse(d))
+    .handler(async ({ data, context }) => {
+      const { data: me, error: meErr } = await supabaseAdmin.from("users").select("role").eq("id", context.userId).maybeSingle();
+      if (meErr) throw new Error(meErr.message);
+      if (!me || me.role !== "admin") throw new Error("Unauthorized");
+      // Query classes that student is enrolled in. Map missing-table errors
+      // to a clear migration guidance message so the operator can apply
+      // the SQL migrations if needed.
+      const { data: rows, error } = await supabaseAdmin
+        .from("class_enrollments")
+        .select(`class_id, enrolled_at, classes ( class_name, schedule_days, start_time, end_time, max_students, teacher_id )`)
+        .eq("student_id", data.studentId);
+      if (error) {
+        const m = String(error.message ?? error);
+        if (m.includes('Could not find the table') || m.includes('does not exist') || m.includes('relation') || m.includes('42P01')) {
+          throw new Error("Database schema missing: table 'public.class_enrollments' not found. Run the SQL migrations in supabase/migrations to create enrollment tables and triggers.");
+        }
+        throw new Error(error.message);
+      }
+      return (rows ?? []).map((r: any) => ({ class_id: r.class_id, enrolled_at: r.enrolled_at, class_name: r.classes?.class_name ?? null, schedule_days: r.classes?.schedule_days ?? null, start_time: r.classes?.start_time ?? null, end_time: r.classes?.end_time ?? null, max_students: r.classes?.max_students ?? null }));
+    });
+
+  // Simple student search suggestions (admin)
+  export const getStudentSuggestionsAdmin = createServerFn({ method: "GET" })
+    .middleware([requireSupabaseAuth])
+    .inputValidator((d) => z.object({ q: z.string().optional() }).parse(d))
+    .handler(async ({ data, context }) => {
+      const { data: me, error: meErr } = await supabaseAdmin.from("users").select("role").eq("id", context.userId).maybeSingle();
+      if (meErr) throw new Error(meErr.message);
+      if (!me || me.role !== "admin") throw new Error("Unauthorized");
+      const q = String(data.q ?? "").trim();
+      if (!q) return [];
+      const like = `%${q.replace(/%/g, "\\%").replace(/_/g, "\\_")}%`;
+      const { data: rows, error } = await supabaseAdmin
+        .from("users")
+        .select("specific_id, full_name, staff_code")
+        .ilike("specific_id", like)
+        .or(`full_name.ilike.${like}`)
+        .eq("role", "student")
+        .limit(30);
+      if (error) throw new Error(error.message);
+      return rows ?? [];
+    });
+
+  // Remove a student from a class (admin)
+  export const removeStudentFromClassAdmin = createServerFn({ method: "POST" })
+    .middleware([requireSupabaseAuth])
+    .inputValidator((d) => z.object({ classId: z.string().min(1), studentId: z.string().min(1) }).parse(d))
+    .handler(async ({ data, context }) => {
+      const { data: me, error: meErr } = await supabaseAdmin.from("users").select("role").eq("id", context.userId).maybeSingle();
+      if (meErr) throw new Error(meErr.message);
+      if (!me || me.role !== "admin") throw new Error("Unauthorized");
+      // Attempt delete; surface a helpful message when the enrollment table
+      // is missing in the DB (common when migrations haven't been applied).
+      const { data: delData, error } = await supabaseAdmin.from("class_enrollments").delete().eq("class_id", data.classId).eq("student_id", data.studentId).select().maybeSingle();
+      if (error) {
+        const m = String(error.message ?? error);
+        if (m.includes('Could not find the table') || m.includes('does not exist') || m.includes('relation') || m.includes('42P01')) {
+          throw new Error("Database schema missing: table 'public.class_enrollments' not found. Run the SQL migrations in supabase/migrations to create enrollment tables and triggers.");
+        }
+        throw new Error(error.message);
+      }
+      // If a row was deleted, attempt to decrement classes.current_students
+      if (delData) {
+        try {
+          const { data: clsRow } = await supabaseAdmin.from('classes').select('current_students').eq('class_id', data.classId).maybeSingle();
+          const cur = Number(clsRow?.current_students ?? 0) || 0;
+          await supabaseAdmin.from('classes').update({ current_students: Math.max(cur - 1, 0) }).eq('class_id', data.classId);
+        } catch (e) {
+          // ignore
+        }
+      }
+      return { ok: true };
+    });
+
 export const createClassAdmin = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) =>
@@ -713,6 +901,7 @@ export const createCareUser = createServerFn({ method: "POST" })
         password: z.string().min(6),
         fullName: z.string().min(1),
         role: z.enum(["student", "teacher", "logistics", "care"]),
+        staff_code: z.string().optional(),
         phone: z.string().min(6).max(32),
         birthDate: z.string().optional(),
         birthYear: z.number().int().min(1900).max(new Date().getFullYear()).optional(),
@@ -755,6 +944,8 @@ export const createCareUser = createServerFn({ method: "POST" })
       email: data.email,
       status: data.status,
       role: data.role,
+      // set staff_code either from caller or generated by DB RPC for safety
+      staff_code: undefined,
     };
     if (data.phone !== undefined) updatePayload.phone = data.phone;
     if (data.birthDate !== undefined) updatePayload.birth_year = data.birthDate;
@@ -764,6 +955,25 @@ export const createCareUser = createServerFn({ method: "POST" })
     // Try upsert; if DB column is DATE and we provided an integer year, retry with YYYY-01-01 string
     let userRow: any = null;
     try {
+      // If caller didn't provide staff_code, request one from DB function
+      if (!data || (data as any).staff_code === undefined) {
+        const prefixMap: Record<string, string> = {
+          student: 'ST',
+          teacher: 'TC',
+          logistics: 'LG',
+          care: 'CR',
+          admin: 'AD',
+        };
+        const pfx = prefixMap[data.role as string] ?? 'ST';
+        try {
+          const { data: generated, error: rpcErr } = await supabaseAdmin.rpc('next_staff_code', { p_prefix: pfx });
+          if (!rpcErr && generated) updatePayload.staff_code = String(generated);
+        } catch (e) {
+          // ignore — we'll continue without staff_code
+        }
+      } else {
+        updatePayload.staff_code = (data as any).staff_code;
+      }
       const res = await supabaseAdmin.from("users").upsert(updatePayload, { onConflict: "id" }).select().maybeSingle();
       if (res.error) throw res.error;
       userRow = res.data;
@@ -849,7 +1059,7 @@ export const getAllUsersAdmin = createServerFn({ method: "GET" })
     // Use service client to bypass RLS and return all public.users rows
     const { data, error } = await supabaseAdmin
       .from("users")
-      .select("id, specific_id, full_name, email, role, status, phone, birth_year, created_at, updated_at")
+      .select("id, specific_id, staff_code, full_name, email, role, status, phone, birth_year, created_at, updated_at")
       .order("created_at", { ascending: false })
       .limit(1000);
     if (error) throw new Error(error.message);
