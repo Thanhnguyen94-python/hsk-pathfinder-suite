@@ -177,14 +177,20 @@ export const assignStudentToOfflineClass = createServerFn({ method: "POST" })
       v_row = existing ?? null;
     }
 
-    // If we inserted a new enrollment (ins present), try to increment
-    // classes.current_students as a fallback in case DB triggers are missing.
-    if (ins && (!v_row || (v_row && v_row.enrolled_at === (ins as any).enrolled_at))) {
+    // After inserting (or finding existing) enrollment, ensure classes.current_students
+    // reflects the actual number of enrollments. Use a reliable count query so we
+    // don't double-increment when DB triggers are present.
+    if (ins || v_row) {
       try {
-        const cur = Number(cls.current_students ?? 0) || 0;
-        await supabaseAdmin.from('classes').update({ current_students: cur + 1 }).eq('class_id', data.classId);
+        // Use head:true to request count without returning rows
+        const { count } = await supabaseAdmin
+          .from('class_enrollments')
+          .select('*', { count: 'exact', head: true })
+          .eq('class_id', data.classId);
+        const newCount = Number(count ?? 0) || 0;
+        await supabaseAdmin.from('classes').update({ current_students: newCount }).eq('class_id', data.classId);
       } catch (e) {
-        // Non-fatal; trigger-based counting is preferred. Ignore update failures.
+        // ignore failures; trigger-based counting is preferred
       }
     }
 
@@ -762,12 +768,17 @@ export const getAllClassesAdmin = createServerFn({ method: "GET" })
         }
         throw new Error(error.message);
       }
-      // If a row was deleted, attempt to decrement classes.current_students
+      // If a row was deleted, recompute the correct current_students count from
+      // the enrollments table and set it. This avoids double-decrement when DB
+      // triggers also maintain the count.
       if (delData) {
         try {
-          const { data: clsRow } = await supabaseAdmin.from('classes').select('current_students').eq('class_id', data.classId).maybeSingle();
-          const cur = Number(clsRow?.current_students ?? 0) || 0;
-          await supabaseAdmin.from('classes').update({ current_students: Math.max(cur - 1, 0) }).eq('class_id', data.classId);
+          const { count } = await supabaseAdmin
+            .from('class_enrollments')
+            .select('*', { count: 'exact', head: true })
+            .eq('class_id', data.classId);
+          const newCount = Number(count ?? 0) || 0;
+          await supabaseAdmin.from('classes').update({ current_students: newCount }).eq('class_id', data.classId);
         } catch (e) {
           // ignore
         }

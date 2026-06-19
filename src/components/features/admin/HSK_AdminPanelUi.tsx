@@ -186,6 +186,7 @@ export function AdminMappingPanel({
   const [teacherSuggestionsVisible, setTeacherSuggestionsVisible] = useState(false);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [addStudentCode, setAddStudentCode] = useState('');
+  const [autoCloseAfterAdd, setAutoCloseAfterAdd] = useState(false);
 
   // suggestions
   const [classSuggestionsVisible, setClassSuggestionsVisible] = useState(false);
@@ -288,11 +289,19 @@ export function AdminMappingPanel({
     try {
       await onAddStudentToClass(cid, code);
       // refresh lists
-      if (getClasses) setLoadingClassesList(true);
-      if (getClasses) getClasses().then((r: any)=>setClassesList(r ?? [])).finally(()=>setLoadingClassesList(false));
-      if (selectedClass) openClass(selectedClass);
-      setAddDialogOpen(false);
+      if (getClasses) { setLoadingClassesList(true); await getClasses().then((r: any)=>setClassesList(r ?? [])).finally(()=>setLoadingClassesList(false)); }
+      // Refresh enrollments for the currently selected class without toggling collapse
+      if (selectedClass && getClassEnrollments) {
+        setLoadingEnrollments(true);
+        await getClassEnrollments(selectedClass.class_id ?? selectedClass.classId)
+          .then((r: any) => setSelectedEnrollments(r ?? []))
+          .catch(() => setSelectedEnrollments([]))
+          .finally(() => setLoadingEnrollments(false));
+      }
+      // Clear input for convenience
       setAddStudentCode('');
+      // Close dialog if user enabled auto-close
+      if (autoCloseAfterAdd) setAddDialogOpen(false);
     } catch (e: any) {
       setActionError((e && e.message) ? e.message : 'Không thể thêm học viên.');
     } finally { setActionPending(false); }
@@ -303,7 +312,15 @@ export function AdminMappingPanel({
     setActionPending(true); setActionError(null);
     try {
       await onRemoveStudentFromClass(selectedClass.class_id ?? selectedClass.classId, sid);
-      openClass(selectedClass);
+      // Refresh enrollments for the current class without toggling collapse
+      if (getClassEnrollments) {
+        setLoadingEnrollments(true);
+        await getClassEnrollments(selectedClass.class_id ?? selectedClass.classId)
+          .then((r: any) => setSelectedEnrollments(r ?? []))
+          .catch(() => setSelectedEnrollments([]))
+          .finally(() => setLoadingEnrollments(false));
+      }
+      // Refresh classes list counts
       if (getClasses) { setLoadingClassesList(true); await getClasses().then((r: any)=>setClassesList(r ?? [])).finally(()=>setLoadingClassesList(false)); }
     } catch (e: any) {
       setActionError((e && e.message) ? e.message : 'Không thể xoá học viên.');
@@ -587,6 +604,10 @@ export function AdminMappingPanel({
               <Label>Mã học viên</Label>
               <Input value={addStudentCode} onChange={(e) => setAddStudentCode(e.target.value)} onFocus={() => fetchStudentSuggestionsNow(addStudentCode)} className="font-mono" placeholder="ST-0001" />
               {studentSuggestionsLoading && <div className="text-xs text-muted-foreground">Đang tìm...</div>}
+              <div className="mt-2 flex items-center gap-2">
+                <Checkbox checked={autoCloseAfterAdd} onCheckedChange={(v) => setAutoCloseAfterAdd(!!v)} />
+                <div className="text-sm">Đóng cửa sổ sau khi thêm</div>
+              </div>
               {studentSuggestions && studentSuggestions.length > 0 && (
                 <div className="mt-1 max-h-40 overflow-auto rounded-md border bg-popover p-1">
                   {studentSuggestions.map((s:any) => (

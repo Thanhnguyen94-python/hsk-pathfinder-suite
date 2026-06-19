@@ -136,7 +136,12 @@ hsk_system/
     │       │
     │       └── admin/            # Admin panel
     │           ├── HSK_AdminPanelView.tsx        # View controller
-    │           └── HSK_AdminPanelUi.tsx          # UI thuần (AdminMappingPanel, AdminAuditLogsPanel, AdminTeacherAnalyticsPanel)
+    │           └── HSK_AdminPanelUi.tsx          # UI thuần — exports multiple admin panels:
+    │                                       # - AdminMappingPanel: gán học viên vào lớp, tìm/kiểm tra xung đột, thêm/xóa học viên
+    │                                       # - AdminClassesPanel: tạo/chỉnh sửa/lọc danh sách lớp, quản lý sĩ số và lịch
+    │                                       # - AdminUserManagementPanel: danh sách tài khoản, chỉnh sửa, soft/hard delete
+    │                                       # - AdminTeacherAnalyticsPanel: thống kê đánh giá, penalty, feedback
+    │                                       # - AdminAuditLogsPanel: xem audit logs hệ thống
     │
     ├── hooks/
     │   ├── use-auth.ts           # Hook lắng nghe Supabase auth session
