@@ -9,7 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Star, MoreHorizontal, Pencil, Trash2, Eye, EyeOff, ChevronDown } from "lucide-react";
+import { Star, MoreHorizontal, Pencil, Trash2, Eye, EyeOff, ChevronDown, Plus, Minus } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -37,6 +37,95 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+const DAY_LABELS = new Map<number, string>([
+  [0, "Chủ nhật"],
+  [1, "Thứ 2"],
+  [2, "Thứ 3"],
+  [3, "Thứ 4"],
+  [4, "Thứ 5"],
+  [5, "Thứ 6"],
+  [6, "Thứ 7"],
+]);
+
+const csvEscape = (v: any) => {
+  if (v === null || v === undefined) return "";
+  const s = String(v);
+  return '"' + s.replace(/"/g, '""') + '"';
+};
+
+const downloadCsv = (csvContent: string, fileName: string) => {
+  const bom = "\uFEFF";
+  const blob = new Blob([bom + csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+};
+
+const getClassId = (c: any) => String(c?.class_id ?? c?.classId ?? "").trim();
+
+const getCurrentStudents = (c: any) => Number(c?.current_students ?? c?.current_students_count ?? 0);
+
+const getMaxStudents = (c: any) => Number(c?.max_students ?? 0) || 0;
+
+const hasTeacherAssigned = (c: any) => Boolean(c?.teacher_id ?? c?.teacherId ?? c?.teacher_staff_code ?? c?.teacher_staffCode);
+
+const isVisibleClass = (c: any) => {
+  const status = c?.status ?? "";
+  const notFull = !getMaxStudents(c) || getCurrentStudents(c) < getMaxStudents(c);
+  return status === "active" || notFull || !hasTeacherAssigned(c);
+};
+
+const findTeacherRecord = (teachers: any[] | undefined, idOrCode: any) => {
+  if (!idOrCode || !Array.isArray(teachers)) return null;
+  const key = String(idOrCode);
+  return (
+    teachers.find((x: any) =>
+      String(x.id ?? "") === key ||
+      String(x.specific_id ?? x.specificId ?? "") === key ||
+      String(x.staff_code ?? x.staffCode ?? "") === key ||
+      String(x.teacher_id ?? "") === key,
+    ) ?? null
+  );
+};
+
+const formatTeacherDisplay = (teacher: any, fallback: string | null) => {
+  if (!teacher) return fallback ?? "";
+  const staffCode = teacher.staff_code ?? teacher.staffCode ?? fallback ?? "";
+  const fullName = teacher.full_name ?? teacher.fullName ?? "";
+  return fullName ? `${staffCode} — ${fullName}` : staffCode;
+};
+
+const formatBirthDateCell = (birthYearOrDate: any) => {
+  if (birthYearOrDate === null || birthYearOrDate === undefined || birthYearOrDate === "") return "";
+  if (typeof birthYearOrDate === "string") {
+    const d = new Date(birthYearOrDate);
+    if (!Number.isNaN(d.getTime())) {
+      const dd = String(d.getDate()).padStart(2, "0");
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const yyyy = d.getFullYear();
+      return `${dd}/${mm}/${yyyy}`;
+    }
+    return String(birthYearOrDate);
+  }
+  return `01/01/${birthYearOrDate}`;
+};
+
+const mergeClassEvents = (remoteEvents: any[] | null, localEvents: any[], classId: string) => {
+  return [
+    ...((remoteEvents ?? []).filter((e: any) => String(e.class_id ?? classId) === String(classId))),
+    ...((localEvents ?? []).filter((e: any) => String(e.class_id) === String(classId))),
+  ].sort((a: any, b: any) => {
+    const ta = new Date(a.created_at ?? a.event_ts ?? 0).getTime();
+    const tb = new Date(b.created_at ?? b.event_ts ?? 0).getTime();
+    return tb - ta;
+  });
+};
 
 export function AdminMappingPanel({
   studentId,
@@ -76,8 +165,6 @@ export function AdminMappingPanel({
 }) {
   const [classDetails, setClassDetails] = useState<any | null>(null);
   const [studentEnrollments, setStudentEnrollments] = useState<any[] | null>(null);
-  const [loadingClass, setLoadingClass] = useState(false);
-  const [loadingStudent, setLoadingStudent] = useState(false);
   const [localErrors, setLocalErrors] = useState<string[]>([]);
 
   useEffect(() => {
@@ -86,16 +173,12 @@ export function AdminMappingPanel({
       setClassDetails(null);
       return;
     }
-    setLoadingClass(true);
     getClassDetails(classId)
       .then((d) => {
         if (!cancelled) setClassDetails(d ?? null);
       })
       .catch(() => {
         if (!cancelled) setClassDetails(null);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingClass(false);
       });
     return () => {
       cancelled = true;
@@ -108,16 +191,12 @@ export function AdminMappingPanel({
       setStudentEnrollments(null);
       return;
     }
-    setLoadingStudent(true);
     getStudentEnrollments(studentId)
       .then((r) => {
         if (!cancelled) setStudentEnrollments(r ?? []);
       })
       .catch(() => {
         if (!cancelled) setStudentEnrollments([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingStudent(false);
       });
     return () => {
       cancelled = true;
@@ -173,8 +252,6 @@ export function AdminMappingPanel({
     setLocalErrors(errs);
   }, [classDetails, studentEnrollments]);
 
-  const localIsDisabled = localErrors.length > 0;
-
   // class roster panel state
   const [classesList, setClassesList] = useState<any[] | null>(null);
   const [loadingClassesList, setLoadingClassesList] = useState(false);
@@ -195,8 +272,6 @@ export function AdminMappingPanel({
   const [removeStudentNote, setRemoveStudentNote] = useState('');
 
   // suggestions
-  const [classSuggestionsVisible, setClassSuggestionsVisible] = useState(false);
-  const [filteredClassSuggestions, setFilteredClassSuggestions] = useState<any[]>([]);
   const [studentSuggestions, setStudentSuggestions] = useState<any[] | null>(null);
   const [studentSuggestionsLoading, setStudentSuggestionsLoading] = useState(false);
   const studentDebounceRef = useRef<number | null>(null);
@@ -204,6 +279,7 @@ export function AdminMappingPanel({
   const [remoteClassEvents, setRemoteClassEvents] = useState<any[] | null>(null);
   const [loadingClassEvents, setLoadingClassEvents] = useState(false);
   const [classEventsError, setClassEventsError] = useState<string | null>(null);
+  const [classEventsVisible, setClassEventsVisible] = useState(true);
 
   const pushLocalClassEvent = (eventType: string, details: Record<string, any>) => {
     const cid = selectedClass?.class_id ?? selectedClass?.classId ?? classId;
@@ -244,9 +320,15 @@ export function AdminMappingPanel({
   // immediate fetch helper for student suggestions (used on focus)
   const fetchStudentSuggestionsNow = async (q?: string) => {
     if (!getStudentSuggestions) return;
+    const query = String(q ?? '').trim();
+    if (!query) {
+      setStudentSuggestions([]);
+      setStudentSuggestionsLoading(false);
+      return;
+    }
     setStudentSuggestionsLoading(true);
     try {
-      const res = await getStudentSuggestions(String(q ?? studentId ?? '').trim());
+      const res = await getStudentSuggestions(query);
       setStudentSuggestions(res ?? []);
     } catch (e) {
       setStudentSuggestions([]);
@@ -286,30 +368,39 @@ export function AdminMappingPanel({
     }
   }, [classId, classesList, getClassEnrollments]);
 
-  // update class suggestions when classesList or classId changes
-  useEffect(() => {
-    if (!classesList) return setFilteredClassSuggestions([]);
-    // filter classes according to requirement: show active OR not full OR missing teacher
-    const visibleClasses = (classesList ?? []).filter((c:any) => {
-      const status = c.status ?? '';
-      const cur = Number(c.current_students ?? c.current_students_count ?? 0);
-      const max = Number(c.max_students ?? c.max_students ?? 0) || 0;
-      const hasTeacher = Boolean(c.teacher_id ?? c.teacherId ?? c.teacher_staff_code ?? c.teacher_staffCode);
-      const notFull = !max || cur < max;
-      return status === 'active' || notFull || !hasTeacher;
-    });
-    const q = String(classId ?? '').trim().toLowerCase();
-    if (!q) {
-      setFilteredClassSuggestions(visibleClasses.slice(0, 10));
-      return;
+  const refreshClassesList = async () => {
+    if (!getClasses) return [];
+    setLoadingClassesList(true);
+    try {
+      const all = (await getClasses()) ?? [];
+      setClassesList(all);
+      return all;
+    } catch {
+      setClassesList([]);
+      return [];
+    } finally {
+      setLoadingClassesList(false);
     }
-    const filtered = visibleClasses.filter((c:any) => (String(c.class_id ?? '').toLowerCase().includes(q) || String(c.class_name ?? '').toLowerCase().includes(q))).slice(0, 10);
-    setFilteredClassSuggestions(filtered);
-  }, [classesList, classId]);
+  };
+
+  const refreshEnrollmentsForClass = async (targetClassId: string) => {
+    if (!getClassEnrollments || !targetClassId) return;
+    setLoadingEnrollments(true);
+    try {
+      const rows = (await getClassEnrollments(targetClassId)) ?? [];
+      setSelectedEnrollments(rows);
+    } catch {
+      setSelectedEnrollments([]);
+    } finally {
+      setLoadingEnrollments(false);
+    }
+  };
 
   const openClass = (c: any) => {
+    const selectedClassId = getClassId(selectedClass);
+    const targetClassId = getClassId(c);
     // toggle collapse if already open
-    if (selectedClass?.class_id === (c.class_id ?? c.classId)) {
+    if (selectedClassId && selectedClassId === targetClassId) {
       setSelectedClass(null);
       setSelectedEnrollments(null);
       return;
@@ -317,21 +408,15 @@ export function AdminMappingPanel({
     setSelectedClass(c);
     setSelectedEnrollments(null);
     if (!getClassEnrollments) return;
-    setLoadingEnrollments(true);
-    getClassEnrollments(c.class_id ?? c.classId)
-      .then((r: any) => setSelectedEnrollments(r ?? []))
-      .catch(() => setSelectedEnrollments([]))
-      .finally(() => setLoadingEnrollments(false));
+    refreshEnrollmentsForClass(targetClassId);
     if (getClassEvents) {
-      refreshClassEvents(c.class_id ?? c.classId);
+      refreshClassEvents(targetClassId);
     }
-    // close class suggestions when opening
-    setClassSuggestionsVisible(false);
   };
   // add student by staff_code (UI passes staff_code, parent resolves to id)
   const handleAddStudent = async (classIdToUse?: string, staffCode?: string) => {
     if (!onAddStudentToClass) return;
-    const cid = classIdToUse ?? (selectedClass?.class_id ?? selectedClass?.classId ?? classId);
+    const cid = classIdToUse || getClassId(selectedClass) || classId;
     const code = staffCode ?? addStudentCode ?? studentId;
     if (!cid || !code) return setActionError('Cần `Class ID` và `Mã nhân viên`.');
     setActionPending(true); setActionError(null);
@@ -342,15 +427,9 @@ export function AdminMappingPanel({
         note: addStudentNote.trim() || 'Thêm học viên vào lớp',
       });
       // refresh lists
-      if (getClasses) { setLoadingClassesList(true); await getClasses().then((r: any)=>setClassesList(r ?? [])).finally(()=>setLoadingClassesList(false)); }
+      await refreshClassesList();
       // Refresh enrollments for the currently selected class without toggling collapse
-      if (selectedClass && getClassEnrollments) {
-        setLoadingEnrollments(true);
-        await getClassEnrollments(selectedClass.class_id ?? selectedClass.classId)
-          .then((r: any) => setSelectedEnrollments(r ?? []))
-          .catch(() => setSelectedEnrollments([]))
-          .finally(() => setLoadingEnrollments(false));
-      }
+      if (selectedClass) await refreshEnrollmentsForClass(getClassId(selectedClass));
       // Clear input for convenience
       setAddStudentCode('');
       setAddStudentNote('');
@@ -366,22 +445,17 @@ export function AdminMappingPanel({
     if (!onRemoveStudentFromClass || !selectedClass) return;
     setActionPending(true); setActionError(null);
     try {
-      await onRemoveStudentFromClass(selectedClass.class_id ?? selectedClass.classId, sid);
+      const selectedClassId = getClassId(selectedClass);
+      await onRemoveStudentFromClass(selectedClassId, sid);
       pushLocalClassEvent('student_removed', {
         student_code: sid,
         note: note?.trim() || 'Xoá học viên khỏi lớp',
       });
       // Refresh enrollments for the current class without toggling collapse
-      if (getClassEnrollments) {
-        setLoadingEnrollments(true);
-        await getClassEnrollments(selectedClass.class_id ?? selectedClass.classId)
-          .then((r: any) => setSelectedEnrollments(r ?? []))
-          .catch(() => setSelectedEnrollments([]))
-          .finally(() => setLoadingEnrollments(false));
-      }
+      await refreshEnrollmentsForClass(selectedClassId);
       // Refresh classes list counts
-      if (getClasses) { setLoadingClassesList(true); await getClasses().then((r: any)=>setClassesList(r ?? [])).finally(()=>setLoadingClassesList(false)); }
-      if (getClassEvents) await refreshClassEvents(selectedClass.class_id ?? selectedClass.classId);
+      await refreshClassesList();
+      if (getClassEvents) await refreshClassEvents(selectedClassId);
       setRemovingStudent(null);
       setRemoveStudentNote('');
     } catch (e: any) {
@@ -392,30 +466,15 @@ export function AdminMappingPanel({
   // update teacher for selectedClass
   const handleUpdateTeacher = async () => {
     if (!onUpdateClass || !selectedClass) return setActionError('Không có lớp để cập nhật.');
-    const cid = selectedClass.class_id ?? selectedClass.classId ?? classId;
+    const cid = getClassId(selectedClass) || classId;
     if (!cid) return setActionError('Cần mã lớp.');
     setActionPending(true); setActionError(null);
     try {
       const oldTid = selectedClass.teacher_id ?? selectedClass.teacherId ?? null;
-      // Resolve staff_code + name from teachers prop
-      const resolveTeacher = (idOrCode: string | null) => {
-        if (!idOrCode || !teachers || !Array.isArray(teachers)) return null;
-        return (teachers as any[]).find((x: any) =>
-          String(x.id ?? '') === String(idOrCode) ||
-          String(x.specific_id ?? x.specificId ?? '') === String(idOrCode) ||
-          String(x.staff_code ?? x.staffCode ?? '') === String(idOrCode)
-        ) ?? null;
-      };
-      const fmtTeacher = (t: any, fallback: string | null) => {
-        if (!t) return fallback;
-        const sc = t.staff_code ?? t.staffCode ?? fallback ?? '';
-        const name = t.full_name ?? t.fullName ?? '';
-        return name ? `${sc} — ${name}` : sc;
-      };
-      const oldT = resolveTeacher(oldTid);
-      const oldTeacherLabel = fmtTeacher(oldT, selectedClass.teacher_staff_code ?? selectedClass.teacher_code ?? oldTid);
-      const newT = resolveTeacher(teacherEdit);
-      const newTeacherLabel = fmtTeacher(newT, teacherEdit);
+      const oldT = findTeacherRecord(teachers, oldTid);
+      const oldTeacherLabel = formatTeacherDisplay(oldT, selectedClass.teacher_staff_code ?? selectedClass.teacher_code ?? oldTid);
+      const newT = findTeacherRecord(teachers, teacherEdit);
+      const newTeacherLabel = formatTeacherDisplay(newT, teacherEdit);
 
       await onUpdateClass(cid, { teacher_id: teacherEdit });
       pushLocalClassEvent('teacher_changed', {
@@ -423,13 +482,10 @@ export function AdminMappingPanel({
         new_teacher: newTeacherLabel,
         note: teacherChangeNote.trim() || 'Đổi giáo viên',
       });
-      // refresh class list and enrollments without toggling collapse
-      // refresh classes list
-      if (getClasses) { setLoadingClassesList(true); const all = await getClasses().then((r:any)=>r ?? []).catch(()=>[]).finally(()=>setLoadingClassesList(false)); setClassesList(all);
-        // try to update selectedClass from fresh data
-        const found = (all ?? []).find((x:any) => String(x.class_id ?? x.classId) === String(cid));
-        if (found) setSelectedClass(found);
-      }
+      // refresh classes list and selected class
+      const all = await refreshClassesList();
+      const found = (all ?? []).find((x:any) => getClassId(x) === String(cid));
+      if (found) setSelectedClass(found);
 
       // also try getClassDetails if available (preferred) to populate latest fields
       if (getClassDetails) {
@@ -441,13 +497,7 @@ export function AdminMappingPanel({
         }
       }
 
-      if (getClassEnrollments) {
-        setLoadingEnrollments(true);
-        await getClassEnrollments(cid)
-          .then((r:any)=>setSelectedEnrollments(r ?? []))
-          .catch(()=>setSelectedEnrollments([]))
-          .finally(()=>setLoadingEnrollments(false));
-      }
+      await refreshEnrollmentsForClass(cid);
       if (getClassEvents) await refreshClassEvents(cid);
       setTeacherChangeNote('');
     } catch (e: any) {
@@ -462,7 +512,7 @@ export function AdminMappingPanel({
       return;
     }
     if (!getClassEvents) return;
-    refreshClassEvents(selectedClass.class_id ?? selectedClass.classId);
+    refreshClassEvents(getClassId(selectedClass));
   }, [selectedClass, getClassEvents]);
 
   // student suggestions: debounce and call getStudentSuggestions if provided
@@ -489,7 +539,8 @@ export function AdminMappingPanel({
     if (!getStudentSuggestions) return;
     const q = String(addStudentCode ?? '').trim();
     if (!q) {
-      // don't clear existing suggestions aggressively when dialog empty
+      setStudentSuggestions([]);
+      setStudentSuggestionsLoading(false);
       return;
     }
     const handle = window.setTimeout(async () => {
@@ -542,7 +593,7 @@ export function AdminMappingPanel({
     // try to show teacher staff_code for readability if available via teachers prop
     const tid = selectedClass.teacher_id ?? selectedClass.teacherId ?? '';
     if (tid && teachers && Array.isArray(teachers)) {
-      const t = teachers.find((x:any) => String(x.id) === String(tid) || String(x.specific_id ?? x.specificId) === String(tid) || String(x.teacher_id) === String(tid));
+      const t = findTeacherRecord(teachers, tid);
       setTeacherEdit(t ? (t.staff_code ?? t.staffCode ?? (t.specific_id ?? t.specificId ?? t.id)) : String(tid));
     } else {
       setTeacherEdit(selectedClass.teacher_staff_code ?? selectedClass.teacher_code ?? selectedClass.teacher_id ?? selectedClass.teacherId ?? '');
@@ -550,14 +601,82 @@ export function AdminMappingPanel({
   }, [selectedClass]);
 
   // compute classes to display: active OR not full OR missing teacher
-  const displayClasses = (classesList ?? []).filter((c:any) => {
-    const status = c.status ?? '';
-    const cur = Number(c.current_students ?? c.current_students_count ?? 0);
-    const max = Number(c.max_students ?? c.max_students ?? 0) || 0;
-    const hasTeacher = Boolean(c.teacher_id ?? c.teacherId ?? c.teacher_staff_code ?? c.teacher_staffCode);
-    const notFull = !max || cur < max;
-    return status === 'active' || notFull || !hasTeacher;
-  });
+  const displayClasses = (classesList ?? []).filter((c: any) => isVisibleClass(c));
+
+  const exportClassCsv = () => {
+    const cols = [
+      'class_id',
+      'class_name',
+      'teacher_id',
+      'teacher_name',
+      'current_students',
+      'max_students',
+      'schedule_days',
+      'start_time',
+      'end_time',
+      'status',
+    ];
+
+    const resolveTeacherLabel = (teacherId: any) => {
+      const id = String(teacherId ?? '').trim();
+      if (!id) return '';
+      const teacher = findTeacherRecord(teachers, id);
+      if (!teacher) return id;
+      return formatTeacherDisplay(teacher, id);
+    };
+
+    const formatScheduleDays = (scheduleDays: any) => {
+      if (!Array.isArray(scheduleDays)) return '';
+      return scheduleDays.map((day: number) => DAY_LABELS.get(day) ?? String(day)).join('; ');
+    };
+
+    const rows = displayClasses.map((c: any) => {
+      const currentStudents = Number(c.current_students ?? c.current_students_count ?? 0);
+      const teacherId = c.teacher_id ?? c.teacherId ?? '';
+      const teacherName = resolveTeacherLabel(teacherId);
+      return cols.map((col) => {
+        if (col === 'teacher_name') return csvEscape(teacherName);
+        if (col === 'current_students') return csvEscape(currentStudents);
+        if (col === 'max_students') return csvEscape(c.max_students ?? '');
+        if (col === 'schedule_days') return csvEscape(formatScheduleDays(c.schedule_days));
+        return csvEscape(c[col] ?? '');
+      }).join(',');
+    });
+
+    const header = cols.map((col) => csvEscape(col)).join(',');
+    const csv = [header, ...rows].join('\n');
+    downloadCsv(csv, `hsk_classes_${new Date().toISOString().slice(0, 10)}.csv`);
+  };
+
+  const exportClassEventsCsv = () => {
+    const currentClassId = selectedClass?.class_id ?? selectedClass?.classId ?? classId;
+    if (!currentClassId) return;
+
+    const merged = mergeClassEvents(remoteClassEvents, localClassEvents, String(currentClassId));
+
+    const cols = ['event_id', 'event_type', 'created_at', 'actor', 'source', 'details'];
+    const rows = merged.map((ev: any, idx: number) => {
+      const evType = String(ev.event_type ?? 'event');
+      const when = ev.created_at ?? ev.event_ts ?? '';
+      const actor = ev.actor_name ?? ev.user_full_name ?? ev.actor_specific_id ?? ev.user_specific_id ?? ev.source ?? 'system';
+      const details = JSON.stringify(ev.details ?? ev.new_value ?? {}, null, 0);
+      return [
+        csvEscape(ev.event_id ?? `${evType}-${idx}`),
+        csvEscape(evType),
+        csvEscape(when),
+        csvEscape(actor),
+        csvEscape(ev.source ?? ''),
+        csvEscape(details),
+      ].join(',');
+    });
+
+    const header = cols.map((col) => csvEscape(col)).join(',');
+    const csv = [header, ...rows].join('\n');
+    downloadCsv(
+      csv,
+      `hsk_class_events_${String(currentClassId).replace(/[^a-zA-Z0-9_-]+/g, '_')}_${new Date().toISOString().slice(0, 10)}.csv`,
+    );
+  };
 
   return (
     <div className="rounded-xl border border-border bg-card p-5">
@@ -577,16 +696,9 @@ export function AdminMappingPanel({
         <div className="mb-3 flex items-center justify-between">
           <h4 className="font-medium">Quản lý danh sách & sĩ số lớp học</h4>
           <div className="flex items-center gap-2">
-            <Button size="sm" variant="ghost" onClick={() => { if (getClasses) { setLoadingClassesList(true); getClasses().then((r: any)=>setClassesList(r ?? [])).finally(()=>setLoadingClassesList(false)); } }}>Refresh</Button>
+            <Button size="sm" variant="ghost" onClick={exportClassCsv}>Export</Button>
+            <Button size="sm" variant="ghost" onClick={refreshClassesList}>Refresh</Button>
           </div>
-          {/* class suggestions dropdown */}
-          {classSuggestionsVisible && filteredClassSuggestions.length > 0 && (
-            <div className="absolute z-40 mt-1 w-64 max-h-56 overflow-auto rounded-md border bg-popover p-1">
-              {filteredClassSuggestions.map((s:any) => (
-                <div key={s.class_id} className="cursor-pointer px-2 py-1 hover:bg-muted" onMouseDown={() => { onClassIdChange(s.class_id); setClassSuggestionsVisible(false); openClass(s); }}>{s.class_id} — {s.class_name ?? ''}</div>
-              ))}
-            </div>
-          )}
         </div>
         <div className="overflow-x-auto">
           <Table>
@@ -606,13 +718,13 @@ export function AdminMappingPanel({
                 <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">Không có lớp.</TableCell></TableRow>
               ) : (
                 displayClasses.map((c:any) => {
-                  const cur = Number(c.current_students ?? c.current_students_count ?? 0);
-                  const max = Number(c.max_students ?? 0) || null;
+                  const cur = getCurrentStudents(c);
+                  const max = getMaxStudents(c) || null;
                   const pct = max ? (cur / max) : 0;
                   const badgeClass = pct >= 1 ? 'bg-destructive text-destructive-foreground' : pct >= 0.8 ? 'bg-yellow-100 text-yellow-800' : 'bg-emerald-100 text-emerald-700';
                   return (
-                    <TableRow key={c.class_id} onClick={() => openClass(c)} className={selectedClass?.class_id === c.class_id ? 'bg-muted/5' : ''}>
-                      <TableCell className="font-mono text-xs">{c.class_id}</TableCell>
+                    <TableRow key={getClassId(c)} onClick={() => openClass(c)} className={getClassId(selectedClass) === getClassId(c) ? 'bg-muted/5' : ''}>
+                      <TableCell className="font-mono text-xs">{getClassId(c)}</TableCell>
                       <TableCell>{c.class_name ?? '—'}</TableCell>
                       <TableCell className="text-center"><span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${badgeClass}`}>{cur}{max ? `/${max}` : ''}</span></TableCell>
                       <TableCell className="text-xs">{(c.schedule_days ?? []).join(', ')} {c.start_time ? `— ${c.start_time}` : ''}</TableCell>
@@ -640,10 +752,7 @@ export function AdminMappingPanel({
                 <div className="font-medium sm:col-span-2">{(() => {
                   if (!selectedClass) return '—';
                   const tid = selectedClass.teacher_id ?? selectedClass.teacherId ?? '';
-                  let t: any = null;
-                  if (teachers && Array.isArray(teachers) && tid) {
-                    t = teachers.find((x: any) => String(x.id) === String(tid) || String(x.specific_id ?? x.specificId ?? '') === String(tid) || String(x.staff_code ?? x.staffCode ?? '') === String(tid));
-                  }
+                  const t = findTeacherRecord(teachers, tid);
                   const name = t?.full_name ?? selectedClass.teacher_name ?? '';
                   const staff = t?.staff_code ?? selectedClass.teacher_staff_code ?? selectedClass.teacher_code ?? '';
                   if (name && staff) return `${name} — ${staff}`;
@@ -699,6 +808,23 @@ export function AdminMappingPanel({
                 <div className="mb-2 flex items-center justify-between">
                   <div className="font-medium">Thông tin sự kiện lớp học</div>
                   <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setClassEventsVisible((v) => !v)}
+                      aria-label={classEventsVisible ? 'Ẩn danh sách sự kiện' : 'Hiện danh sách sự kiện'}
+                    >
+                      {classEventsVisible ? <Minus className="mr-1 h-4 w-4" /> : <Plus className="mr-1 h-4 w-4" />}
+                      {classEventsVisible ? 'Ẩn' : 'Hiện'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={exportClassEventsCsv}
+                      disabled={!selectedClass}
+                    >
+                      Export logs
+                    </Button>
                     <span className="text-xs text-muted-foreground">UI preview</span>
                     <Button
                       size="sm"
@@ -711,16 +837,9 @@ export function AdminMappingPanel({
                   </div>
                 </div>
 
-                {(() => {
-                  const currentClassId = selectedClass.class_id ?? selectedClass.classId;
-                  const merged = [
-                    ...((remoteClassEvents ?? []).filter((e: any) => String(e.class_id ?? currentClassId) === String(currentClassId))),
-                    ...((localClassEvents ?? []).filter((e: any) => String(e.class_id) === String(currentClassId))),
-                  ].sort((a: any, b: any) => {
-                    const ta = new Date(a.created_at ?? a.event_ts ?? 0).getTime();
-                    const tb = new Date(b.created_at ?? b.event_ts ?? 0).getTime();
-                    return tb - ta;
-                  });
+                {classEventsVisible ? (() => {
+                  const currentClassId = getClassId(selectedClass);
+                  const merged = mergeClassEvents(remoteClassEvents, localClassEvents, currentClassId);
 
                   if (loadingClassEvents) {
                     return <div className="text-sm text-muted-foreground">Đang tải sự kiện...</div>;
@@ -764,7 +883,11 @@ export function AdminMappingPanel({
                       })}
                     </div>
                   );
-                })()}
+                })() : (
+                  <div className="text-sm text-muted-foreground">
+                    Danh sách sự kiện đang được ẩn. Nhấn nút Hiện để xem lại.
+                  </div>
+                )}
               </div>
             </div>
           ) : (
@@ -780,18 +903,37 @@ export function AdminMappingPanel({
             <DialogDescription>Nhập mã học viên và lý do ghi danh.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            <div>
+            <div className="relative">
               <Label>Mã học viên</Label>
-              <Input value={addStudentCode} onChange={(e) => setAddStudentCode(e.target.value)} onFocus={() => fetchStudentSuggestionsNow(addStudentCode)} className="font-mono" placeholder="ST-0001" />
-              {studentSuggestionsLoading && <div className="text-xs text-muted-foreground">Đang tìm...</div>}
+              <Input 
+                value={addStudentCode} 
+                onChange={(e) => setAddStudentCode(e.target.value)} 
+                onFocus={() => fetchStudentSuggestionsNow(addStudentCode)} 
+                className="font-mono" 
+                placeholder="ST-0001" 
+              />
+              {studentSuggestionsLoading && <div className="text-xs text-muted-foreground mt-1">Đang tìm...</div>}
+              {!studentSuggestionsLoading && String(addStudentCode ?? '').trim().length > 0 && Array.isArray(studentSuggestions) && studentSuggestions.length === 0 && (
+                <div className="text-xs text-muted-foreground mt-1">Không tìm thấy học viên phù hợp.</div>
+              )}
               <div className="mt-2 flex items-center gap-2">
                 <Checkbox checked={autoCloseAfterAdd} onCheckedChange={(v) => setAutoCloseAfterAdd(!!v)} />
                 <div className="text-sm">Đóng cửa sổ sau khi thêm</div>
               </div>
               {studentSuggestions && studentSuggestions.length > 0 && (
-                <div className="mt-1 max-h-40 overflow-auto rounded-md border bg-popover p-1">
+                <div className="absolute left-0 right-0 z-50 mt-1 max-h-40 overflow-auto rounded-md border bg-popover p-1 shadow-lg top-full">
                   {studentSuggestions.map((s:any) => (
-                    <div key={s.staff_code ?? s.specific_id ?? s.id} className="cursor-pointer px-2 py-1 hover:bg-muted" onMouseDown={() => { setAddStudentCode(s.staff_code ?? s.specific_id ?? s.id); setStudentSuggestions(null); }}>{(s.staff_code ?? s.specific_id ?? s.id)} — {s.full_name ?? s.student_name ?? ''}</div>
+                    <div 
+                      key={s.staff_code ?? s.specific_id ?? s.id} 
+                      className="cursor-pointer px-2 py-1 hover:bg-muted rounded text-sm" 
+                      onMouseDown={(e) => { 
+                        e.preventDefault(); 
+                        setAddStudentCode(s.staff_code ?? s.specific_id ?? s.id); 
+                        setStudentSuggestions(null); 
+                      }}
+                    >
+                      {(s.staff_code ?? s.specific_id ?? s.id)} — {s.full_name ?? s.student_name ?? ''}
+                    </div>
                   ))}
                 </div>
               )}
@@ -806,7 +948,12 @@ export function AdminMappingPanel({
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={() => { setAddDialogOpen(false); setAddStudentCode(''); setAddStudentNote(''); }}>Huỷ</Button>
-              <Button onClick={() => handleAddStudent(selectedClass?.class_id, addStudentCode)} disabled={actionPending || !addStudentCode}>Thêm</Button>
+              <Button 
+                onClick={() => handleAddStudent(selectedClass?.class_id, addStudentCode)} 
+                disabled={actionPending || !String(addStudentCode ?? '').trim()}
+              >
+                Thêm
+              </Button>
             </div>
           </div>
         </DialogContent>
@@ -1092,40 +1239,10 @@ export function AdminUserManagementPanel({
   // export displayed users as CSV
   const exportCsv = () => {
     const cols = ['specific_id','staff_code','full_name','email','role','status','phone','birth_year','created_at','updated_at'];
-    const escape = (v: any) => {
-      if (v === null || v === undefined) return '';
-      const s = String(v);
-      return '"' + s.replace(/"/g, '""') + '"';
-    };
-    const formatBirth = (u: any) => {
-      const by = u.birth_year;
-      if (by === null || by === undefined || by === '') return '';
-      if (typeof by === 'string') {
-        const d = new Date(by);
-        if (!Number.isNaN(d.getTime())) {
-          const dd = String(d.getDate()).padStart(2, '0');
-          const mm = String(d.getMonth() + 1).padStart(2, '0');
-          const yyyy = d.getFullYear();
-          return `${dd}/${mm}/${yyyy}`;
-        }
-        return String(by);
-      }
-      return `01/01/${by}`;
-    };
-    const rows = displayedUsers.map((u: any) => cols.map((c) => (c === 'birth_year' ? escape(formatBirth(u)) : escape(u[c] ?? ''))).join(','));
-    const header = cols.map((c) => escape(c)).join(',');
+    const rows = displayedUsers.map((u: any) => cols.map((c) => (c === 'birth_year' ? csvEscape(formatBirthDateCell(u.birth_year)) : csvEscape(u[c] ?? ''))).join(','));
+    const header = cols.map((c) => csvEscape(c)).join(',');
     const csv = [header, ...rows].join('\n');
-    // prepend UTF-8 BOM so Excel detects UTF-8 with accents correctly
-    const bom = '\uFEFF';
-    const blob = new Blob([bom + csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `hsk_users_${new Date().toISOString().slice(0,10)}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    downloadCsv(csv, `hsk_users_${new Date().toISOString().slice(0,10)}.csv`);
   };
 
   return (
@@ -1236,23 +1353,7 @@ export function AdminUserManagementPanel({
                           );
                           if (k === 'phone') return <TableCell key={k} className="font-mono text-xs">{u.phone ?? '—'}</TableCell>;
                           if (k === 'birth_year') {
-                            const by = u.birth_year;
-                            let display = '—';
-                            if (by !== null && by !== undefined) {
-                              if (typeof by === 'string') {
-                                const d = new Date(by);
-                                if (!Number.isNaN(d.getTime())) {
-                                  const dd = String(d.getDate()).padStart(2, '0');
-                                  const mm = String(d.getMonth() + 1).padStart(2, '0');
-                                  const yyyy = d.getFullYear();
-                                  display = `${dd}/${mm}/${yyyy}`;
-                                } else {
-                                  display = String(by);
-                                }
-                              } else {
-                                display = `01/01/${by}`;
-                              }
-                            }
+                            const display = formatBirthDateCell(u.birth_year) || '—';
                             return <TableCell key={k} className="text-xs">{display}</TableCell>;
                           }
                           if (k === 'created_at') return <TableCell key={k} className="text-xs">{u.created_at ? new Date(u.created_at).toLocaleString() : '—'}</TableCell>;
@@ -1603,7 +1704,7 @@ export function AdminClassesPanel({
           <h3 className="font-display text-lg font-semibold">Tạo lớp học</h3>
           <div className="flex items-center gap-2">
             <Input placeholder="Tìm kiếm" value={filterText} onChange={(e) => setFilterText(e.target.value)} />
-            <Button variant="ghost" onClick={startCreate}>Làm mới DS</Button>
+            <Button variant="ghost" onClick={startCreate}>Refresh</Button>
           </div>
         </div>
 
@@ -1730,11 +1831,6 @@ export function AdminClassesPanel({
               <Button size="sm" variant="ghost" onClick={() => {
                 // export CSV
                 const cols = ['class_id','class_name','teacher_id','current_students','schedule_days','total_lessons','start_date','end_date','start_time','end_time','max_students','room_link','status','created_at','updated_at'];
-                const escape = (v: any) => {
-                  if (v === null || v === undefined) return '';
-                  const s = String(v);
-                  return '"' + s.replace(/"/g, '""') + '"';
-                };
                 const formatSchedule = (sd: any) => {
                   if (!sd) return '';
                   try {
@@ -1748,23 +1844,14 @@ export function AdminClassesPanel({
                   return String(v);
                 };
                 const rows = displayed.map((c:any) => cols.map((k) => {
-                  if (k === 'schedule_days') return escape(formatSchedule(c.schedule_days));
-                  if (k === 'current_students') return escape(currentStudentCounts?.[c.class_id] ?? c.current_students ?? 0);
-                  if (k === 'start_date' || k === 'end_date' || k === 'created_at' || k === 'updated_at') return escape(formatDate(c[k]));
-                  return escape(c[k] ?? '');
+                  if (k === 'schedule_days') return csvEscape(formatSchedule(c.schedule_days));
+                  if (k === 'current_students') return csvEscape(currentStudentCounts?.[c.class_id] ?? c.current_students ?? 0);
+                  if (k === 'start_date' || k === 'end_date' || k === 'created_at' || k === 'updated_at') return csvEscape(formatDate(c[k]));
+                  return csvEscape(c[k] ?? '');
                 }).join(','));
-                const header = ['class_id','class_name','teacher_id','current_students','schedule_days','total_lessons','start_date','end_date','start_time','end_time','max_students','room_link','status','created_at','updated_at'].map((h)=>escape(h)).join(',');
+                const header = ['class_id','class_name','teacher_id','current_students','schedule_days','total_lessons','start_date','end_date','start_time','end_time','max_students','room_link','status','created_at','updated_at'].map((h)=>csvEscape(h)).join(',');
                 const csv = [header, ...rows].join('\n');
-                const bom = '\uFEFF';
-                const blob = new Blob([bom + csv], { type: 'text/csv;charset=utf-8;' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `hsk_classes_${new Date().toISOString().slice(0,10)}.csv`;
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                URL.revokeObjectURL(url);
+                downloadCsv(csv, `hsk_classes_${new Date().toISOString().slice(0,10)}.csv`);
               }}>Export</Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

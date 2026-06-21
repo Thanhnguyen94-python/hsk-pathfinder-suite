@@ -45,12 +45,13 @@ export function HSK_AdminPanelView() {
   const usersQuery = useQuery({ queryKey: ["admin-users"], queryFn: () => getAllUsersFn(), enabled: Boolean(!loading && user) });
 
   // helper to resolve a staff_code (or fallback identifiers) to the actual user id/specific_id
-  const resolveUserIdFromCode = (code?: string) => {
+  const resolveUserIdFromCode = (code?: string, expectedRole?: string) => {
     if (!code) return null;
     const users = (usersQuery.data ?? []) as any[];
     const c = String(code).trim();
     if (!c) return null;
     const found = users.find((u) => {
+      if (expectedRole && String(u.role ?? "") !== expectedRole) return false;
       const sc = String(u.staff_code ?? u.staffCode ?? "");
       const sid = String(u.specific_id ?? u.specificId ?? "");
       const authId = String(u.id ?? "");
@@ -60,6 +61,36 @@ export function HSK_AdminPanelView() {
     // the `classes`/`class_enrollments` relationships). Fall back to auth `id` only
     // when `specific_id` is not available.
     return found ? (found.specific_id ?? found.specificId ?? found.id ?? null) : null;
+  };
+
+  const getStudentSuggestionsSafe = async (q: string) => {
+    const keyword = String(q ?? "").trim().toLowerCase();
+    if (!keyword) return [];
+
+    const users = (usersQuery.data ?? []) as any[];
+    const local = users
+      .filter((u: any) => String(u.role ?? "") === "student")
+      .filter((u: any) => {
+        const sc = String(u.staff_code ?? u.staffCode ?? "").toLowerCase();
+        const sid = String(u.specific_id ?? u.specificId ?? "").toLowerCase();
+        const name = String(u.full_name ?? u.fullName ?? "").toLowerCase();
+        return sc.includes(keyword) || sid.includes(keyword) || name.includes(keyword);
+      })
+      .slice(0, 30)
+      .map((u: any) => ({
+        staff_code: u.staff_code ?? u.staffCode ?? null,
+        specific_id: u.specific_id ?? u.specificId ?? null,
+        full_name: u.full_name ?? u.fullName ?? null,
+      }));
+
+    if (local.length > 0) return local;
+
+    try {
+      const remote = (await getStudentSuggestionsFn({ data: { q: keyword } })) ?? [];
+      return remote;
+    } catch {
+      return [];
+    }
   };
 
   const updateMutation = useMutation({
@@ -223,16 +254,16 @@ export function HSK_AdminPanelView() {
             getClassEnrollments={(cid: string) => getClassEnrollmentsFn({ data: { classId: cid } })}
             // when AdminMappingPanel asks to add/remove by staff_code, resolve to actual id
             onAddStudentToClass={(cid: string, sid: string) => {
-              const uid = resolveUserIdFromCode(sid);
+              const uid = resolveUserIdFromCode(sid, 'student');
               if (!uid) return Promise.reject(new Error('Không tìm thấy học viên với mã nhân viên đã nhập'));
               return assignFn({ data: { studentId: uid, classId: cid } });
             }}
             onRemoveStudentFromClass={(cid: string, sid: string) => {
-              const uid = resolveUserIdFromCode(sid);
+              const uid = resolveUserIdFromCode(sid, 'student');
               if (!uid) return Promise.reject(new Error('Không tìm thấy học viên với mã nhân viên đã nhập'));
               return removeStudentFn({ data: { classId: cid, studentId: uid } });
             }}
-            getStudentSuggestions={(q: string) => getStudentSuggestionsFn({ data: { q } })}
+            getStudentSuggestions={getStudentSuggestionsSafe}
             // when updating class teacher, accept staff_code and resolve to actual id if present
             onUpdateClass={(cid: string, updates: Record<string, any>) => {
               const up = { ...updates } as Record<string, any>;

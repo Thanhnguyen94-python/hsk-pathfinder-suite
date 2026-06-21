@@ -1,6 +1,79 @@
-# HSK System — Tài liệu dự án (Context cho AI)
+# HSK System
 
-> **Mục đích của file này:** Cung cấp ngữ cảnh đầy đủ cho các AI assistant khi được nhờ code thêm tính năng vào dự án. Đọc toàn bộ trước khi viết bất kỳ dòng code nào.
+Tài liệu dự án chính thức cho vận hành, phát triển và bảo trì.
+
+## Quick Start
+
+1. Cài dependency
+
+```bash
+npm install
+```
+
+2. Tạo `.env` tại root
+
+```env
+SUPABASE_URL=...
+SUPABASE_PUBLISHABLE_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+```
+
+3. Chạy dev
+
+```bash
+npm run dev
+```
+
+## Scripts
+
+- `npm run dev`
+- `npm run build`
+- `npm run preview`
+- `npm run lint`
+- `npm run test:run`
+- `npm run seed:care`
+
+## Kiến trúc chính
+
+- Frontend: React + TypeScript + TanStack Router/Query/Start
+- UI: Tailwind v4 + shadcn/ui
+- Backend: Supabase (Auth/Postgres/RPC)
+- Deploy: Cloudflare Workers
+
+## Cấu trúc thư mục cốt lõi
+
+- [src/routes](src/routes): route pages
+- [src/components/features](src/components/features): feature UI theo role
+- [src/hooks/hsk-viewmodels](src/hooks/hsk-viewmodels): viewmodels/business hooks
+- [src/lib/hsk.functions.ts](src/lib/hsk.functions.ts): server functions
+- [supabase/migrations](supabase/migrations): SQL migrations
+
+## Admin module (đã clean code)
+
+File chính: [src/components/features/admin/HSK_AdminPanelUi.tsx](src/components/features/admin/HSK_AdminPanelUi.tsx)
+
+Cải tiến đã áp dụng:
+
+- Chuẩn hoá helper CSV (`csvEscape`, `downloadCsv`)
+- Chuẩn hoá helper xử lý lớp (`getClassId`, `getCurrentStudents`, `getMaxStudents`, `isVisibleClass`)
+- Chuẩn hoá helper event (`mergeClassEvents`)
+- Chuẩn hoá helper teacher lookup (`findTeacherRecord`, `formatTeacherDisplay`)
+- Giảm state/effect dư thừa trong `AdminMappingPanel`
+- Gom các đoạn refresh lặp lại vào helper (`refreshClassesList`, `refreshEnrollmentsForClass`)
+
+## Checklist trước khi commit
+
+```bash
+npm run lint
+npm run test:run
+npm run build
+```
+
+---
+
+## Phụ lục legacy (giữ lại để tham chiếu)
+
+> Nội dung bên dưới là tài liệu context cũ; có thể tham khảo thêm khi cần chi tiết sâu.
 
 ---
 

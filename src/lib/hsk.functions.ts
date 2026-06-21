@@ -141,6 +141,20 @@ export const assignStudentToOfflineClass = createServerFn({ method: "POST" })
       .maybeSingle();
     if (clsErr) throw new Error(clsErr.message);
     if (!cls || !cls.class_id) throw new Error(`Class ${data.classId} not found`);
+    // Validate target user exists and is a student.
+    // Accept input as specific_id/id/staff_code, then normalize to specific_id when possible.
+    const rawStudentId = String(data.studentId ?? "").trim();
+    const { data: targetUser, error: targetErr } = await supabaseAdmin
+      .from("users")
+      .select("id, specific_id, role, staff_code")
+      .or(`specific_id.eq.${rawStudentId},id.eq.${rawStudentId},staff_code.eq.${rawStudentId}`)
+      .maybeSingle();
+    if (targetErr) throw new Error(targetErr.message);
+    if (!targetUser) throw new Error("Không tìm thấy học viên với mã đã nhập");
+    if (targetUser.role !== "student") {
+      throw new Error("Chỉ được thêm tài khoản có vai trò học viên vào lớp học");
+    }
+    const normalizedStudentId = String(targetUser.specific_id ?? targetUser.id ?? rawStudentId);
     // NOTE: previously we required cls.type === 'offline_group'. Relax that
     // restriction so admins can assign students to classes regardless of the
     // stored type value (some environments/migrations use different type
@@ -149,7 +163,7 @@ export const assignStudentToOfflineClass = createServerFn({ method: "POST" })
     // Try to insert enrollment (allow conflict)
     const { data: ins, error: insErr } = await supabaseAdmin
       .from("class_enrollments")
-      .insert({ class_id: data.classId, student_id: data.studentId })
+      .insert({ class_id: data.classId, student_id: normalizedStudentId })
       .select()
       .maybeSingle();
     // Map missing table errors to a helpful message
@@ -165,7 +179,7 @@ export const assignStudentToOfflineClass = createServerFn({ method: "POST" })
       const { data: existing, error: exErr } = await supabaseAdmin
         .from("class_enrollments")
         .select("*")
-        .match({ class_id: data.classId, student_id: data.studentId })
+        .match({ class_id: data.classId, student_id: normalizedStudentId })
         .maybeSingle();
       if (exErr) {
         const m = String(exErr.message ?? exErr);
@@ -200,7 +214,7 @@ export const assignStudentToOfflineClass = createServerFn({ method: "POST" })
         user_id: context.userId ?? null,
         user_specific_id: null,
         action: "assign_student_to_offline_class",
-        details: { student_id: data.studentId, class_id: data.classId },
+        details: { student_id: normalizedStudentId, class_id: data.classId },
       });
     } catch (lErr: any) {
       // ignore logging errors
@@ -214,8 +228,8 @@ export const assignStudentToOfflineClass = createServerFn({ method: "POST" })
         event_type: "student_added",
         actor_id: context.userId ?? null,
         actor_specific_id: actor?.specific_id ?? null,
-        details: { student_id: data.studentId, note: "Admin gán học viên vào lớp" },
-        new_value: { student_id: data.studentId, class_id: data.classId },
+        details: { student_id: normalizedStudentId, note: "Admin gán học viên vào lớp" },
+        new_value: { student_id: normalizedStudentId, class_id: data.classId },
         source: "app",
       });
     } catch (evErr) {
@@ -755,15 +769,28 @@ export const getAllClassesAdmin = createServerFn({ method: "GET" })
       const q = String(data.q ?? "").trim();
       if (!q) return [];
       const like = `%${q.replace(/%/g, "\\%").replace(/_/g, "\\_")}%`;
-      const { data: rows, error } = await supabaseAdmin
-        .from("users")
-        .select("specific_id, full_name, staff_code")
-        .ilike("specific_id", like)
-        .or(`full_name.ilike.${like}`)
-        .eq("role", "student")
-        .limit(30);
-      if (error) throw new Error(error.message);
-      return rows ?? [];
+      const [bySpecific, byStaff, byName] = await Promise.all([
+        supabaseAdmin.from("users").select("specific_id, full_name, staff_code").eq("role", "student").ilike("specific_id", like).limit(30),
+        supabaseAdmin.from("users").select("specific_id, full_name, staff_code").eq("role", "student").ilike("staff_code", like).limit(30),
+        supabaseAdmin.from("users").select("specific_id, full_name, staff_code").eq("role", "student").ilike("full_name", like).limit(30),
+      ]);
+      if (bySpecific.error) throw new Error(bySpecific.error.message);
+      if (byStaff.error) throw new Error(byStaff.error.message);
+      if (byName.error) throw new Error(byName.error.message);
+
+      const merged = [
+        ...(bySpecific.data ?? []),
+        ...(byStaff.data ?? []),
+        ...(byName.data ?? []),
+      ];
+
+      const map = new Map<string, any>();
+      for (const r of merged) {
+        const key = String(r.staff_code ?? r.specific_id ?? "");
+        if (!key) continue;
+        if (!map.has(key)) map.set(key, r);
+      }
+      return Array.from(map.values()).slice(0, 30);
     });
 
   // Remove a student from a class (admin)
