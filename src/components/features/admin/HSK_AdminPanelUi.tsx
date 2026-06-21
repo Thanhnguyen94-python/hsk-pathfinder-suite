@@ -48,6 +48,12 @@ const DAY_LABELS = new Map<number, string>([
   [6, "Thứ 7"],
 ]);
 
+const CLASS_STATUS_LABELS: Record<string, string> = {
+  pending: 'Chờ khai giảng',
+  active: 'Đang hoạt động',
+  completed: 'Đã hoàn thành',
+};
+
 const csvEscape = (v: any) => {
   if (v === null || v === undefined) return "";
   const s = String(v);
@@ -126,6 +132,78 @@ const mergeClassEvents = (remoteEvents: any[] | null, localEvents: any[], classI
     return tb - ta;
   });
 };
+
+// ─── Reusable sort utilities ──────────────────────────────────────────────────
+
+/**
+ * Reusable sort hook.
+ * • Click once on a column → ascending (A→Z / 0→9).
+ * • Click same column again → descending.
+ * Pass an optional `getComparableValue` for computed / nested sort keys.
+ */
+function useSortableTable<T extends Record<string, any>>(
+  data: T[],
+  getComparableValue?: (item: T, key: string) => any,
+) {
+  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  const handleSort = (key: string) => {
+    if (sortKey === key) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+  };
+
+  const sorted = [...data].sort((a, b) => {
+    if (!sortKey) return 0;
+    const av = getComparableValue ? getComparableValue(a, sortKey) : (a[sortKey] ?? '');
+    const bv = getComparableValue ? getComparableValue(b, sortKey) : (b[sortKey] ?? '');
+    if (av === bv) return 0;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
+    return String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' }) * dir;
+  });
+
+  return { sortKey, sortDir, handleSort, sorted };
+}
+
+/** Sortable column header — triangle turns blue when this column is the active sort key. */
+function SortableTableHead({
+  label,
+  sortKey,
+  currentSortKey,
+  sortDir,
+  onSort,
+  className,
+}: {
+  label: string;
+  sortKey: string;
+  currentSortKey: string | null;
+  sortDir: 'asc' | 'desc';
+  onSort: (key: string) => void;
+  className?: string;
+}) {
+  const isActive = currentSortKey === sortKey;
+  return (
+    <TableHead
+      className={`cursor-pointer select-none ${className ?? ''}`}
+      onClick={() => onSort(sortKey)}
+    >
+      <span className="inline-flex items-center gap-1 whitespace-nowrap">
+        {label}
+        <span
+          className={`text-[10px] transition-colors ${isActive ? 'text-blue-500' : 'text-muted-foreground/30'}`}
+          aria-hidden="true"
+        >
+          {isActive && sortDir === 'desc' ? '▼' : '▲'}
+        </span>
+      </span>
+    </TableHead>
+  );
+}
 
 export function AdminMappingPanel({
   studentId,
@@ -419,6 +497,28 @@ export function AdminMappingPanel({
     const cid = classIdToUse || getClassId(selectedClass) || classId;
     const code = staffCode ?? addStudentCode ?? studentId;
     if (!cid || !code) return setActionError('Cần `Class ID` và `Mã nhân viên`.');
+
+    // Capacity check: prevent adding beyond class max size when dialog remains open
+    const maxStudents = Number(selectedClass?.max_students ?? 0);
+    const currentStudents = Array.isArray(selectedEnrollments)
+      ? selectedEnrollments.length
+      : Number(selectedClass?.current_students ?? 0);
+    if (maxStudents > 0 && currentStudents >= maxStudents) {
+      return setActionError(`Lớp đã đủ sĩ số (${currentStudents}/${maxStudents}), không thể thêm học viên.`);
+    }
+
+    // Duplicate check: verify student is not already enrolled in this class
+    if (selectedEnrollments && selectedEnrollments.length > 0) {
+      const codeNorm = String(code).trim().toLowerCase();
+      const alreadyEnrolled = selectedEnrollments.some((s: any) => {
+        const sc = String(s.staff_code ?? s.student_id ?? s.specific_id ?? s.id ?? '').trim().toLowerCase();
+        return sc === codeNorm;
+      });
+      if (alreadyEnrolled) {
+        return setActionError(`Học viên "${code}" đã có trong danh sách lớp này, không thể thêm trùng.`);
+      }
+    }
+
     setActionPending(true); setActionError(null);
     try {
       await onAddStudentToClass(cid, code);
@@ -427,7 +527,9 @@ export function AdminMappingPanel({
         note: addStudentNote.trim() || 'Thêm học viên vào lớp',
       });
       // refresh lists
-      await refreshClassesList();
+      const all = await refreshClassesList();
+      const refreshedClass = (all ?? []).find((x:any) => getClassId(x) === String(cid));
+      if (refreshedClass) setSelectedClass(refreshedClass);
       // Refresh enrollments for the currently selected class without toggling collapse
       if (selectedClass) await refreshEnrollmentsForClass(getClassId(selectedClass));
       // Clear input for convenience
@@ -603,6 +705,17 @@ export function AdminMappingPanel({
   // compute classes to display: active OR not full OR missing teacher
   const displayClasses = (classesList ?? []).filter((c: any) => isVisibleClass(c));
 
+  const {
+    sortKey: classMappingSortKey,
+    sortDir: classMappingSortDir,
+    handleSort: handleClassMappingSort,
+    sorted: sortedDisplayClasses,
+  } = useSortableTable(displayClasses, (c, key) => {
+    if (key === 'current_students') return getCurrentStudents(c);
+    if (key === 'start_time') return String(c.start_time ?? '');
+    return String(c[key] ?? '');
+  });
+
   const exportClassCsv = () => {
     const cols = [
       'class_id',
@@ -630,7 +743,7 @@ export function AdminMappingPanel({
       return scheduleDays.map((day: number) => DAY_LABELS.get(day) ?? String(day)).join('; ');
     };
 
-    const rows = displayClasses.map((c: any) => {
+    const rows = sortedDisplayClasses.map((c: any) => {
       const currentStudents = Number(c.current_students ?? c.current_students_count ?? 0);
       const teacherId = c.teacher_id ?? c.teacherId ?? '';
       const teacherName = resolveTeacherLabel(teacherId);
@@ -704,20 +817,20 @@ export function AdminMappingPanel({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Mã</TableHead>
-                <TableHead>Tên lớp</TableHead>
-                <TableHead className="text-center">Sĩ số</TableHead>
-                <TableHead>Thứ / Giờ</TableHead>
-                <TableHead>Trạng thái</TableHead>
+                <SortableTableHead label="Mã" sortKey="class_id" currentSortKey={classMappingSortKey} sortDir={classMappingSortDir} onSort={handleClassMappingSort} />
+                <SortableTableHead label="Tên lớp" sortKey="class_name" currentSortKey={classMappingSortKey} sortDir={classMappingSortDir} onSort={handleClassMappingSort} />
+                <SortableTableHead label="Sĩ số" sortKey="current_students" currentSortKey={classMappingSortKey} sortDir={classMappingSortDir} onSort={handleClassMappingSort} className="text-center" />
+                <SortableTableHead label="Thứ / Giờ" sortKey="start_time" currentSortKey={classMappingSortKey} sortDir={classMappingSortDir} onSort={handleClassMappingSort} />
+                <SortableTableHead label="Trạng thái" sortKey="status" currentSortKey={classMappingSortKey} sortDir={classMappingSortDir} onSort={handleClassMappingSort} />
               </TableRow>
             </TableHeader>
             <TableBody>
               {loadingClassesList ? (
                 <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">Đang tải...</TableCell></TableRow>
-              ) : displayClasses.length === 0 ? (
+              ) : sortedDisplayClasses.length === 0 ? (
                 <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">Không có lớp.</TableCell></TableRow>
               ) : (
-                displayClasses.map((c:any) => {
+                sortedDisplayClasses.map((c:any) => {
                   const cur = getCurrentStudents(c);
                   const max = getMaxStudents(c) || null;
                   const pct = max ? (cur / max) : 0;
@@ -728,7 +841,7 @@ export function AdminMappingPanel({
                       <TableCell>{c.class_name ?? '—'}</TableCell>
                       <TableCell className="text-center"><span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${badgeClass}`}>{cur}{max ? `/${max}` : ''}</span></TableCell>
                       <TableCell className="text-xs">{(c.schedule_days ?? []).join(', ')} {c.start_time ? `— ${c.start_time}` : ''}</TableCell>
-                      <TableCell><span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${c.status === 'active' ? 'bg-emerald-100 text-emerald-700' : c.status === 'completed' ? 'bg-muted text-muted-foreground' : 'bg-yellow-100 text-yellow-800'}`}>{c.status}</span></TableCell>
+                      <TableCell><span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${c.status === 'active' ? 'bg-emerald-100 text-emerald-700' : c.status === 'completed' ? 'bg-muted text-muted-foreground' : 'bg-yellow-100 text-yellow-800'}`}>{CLASS_STATUS_LABELS[c.status] ?? c.status}</span></TableCell>
                     </TableRow>
                   );
                 })
@@ -744,7 +857,7 @@ export function AdminMappingPanel({
               <div className="mb-2 flex items-center justify-between">
                 <div className="font-medium">Thông tin lớp: {selectedClass.class_id}</div>
                 <div className="flex items-center gap-2">
-                  <Button size="sm" onClick={() => setAddDialogOpen(true)} disabled={actionPending || (selectedClass.max_students && (Number(selectedClass.current_students ?? 0) >= Number(selectedClass.max_students)))}>Thêm học viên</Button>
+                  <Button size="sm" onClick={() => setAddDialogOpen(true)} disabled={actionPending || (Number(selectedClass?.max_students ?? 0) > 0 && ((Array.isArray(selectedEnrollments) ? selectedEnrollments.length : Number(selectedClass?.current_students ?? 0)) >= Number(selectedClass?.max_students ?? 0)))}>Thêm học viên</Button>
                 </div>
               </div>
               <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-3 items-center">
@@ -999,6 +1112,27 @@ export function AdminTeacherAnalyticsPanel({
   teachers: any[];
   ratings: any[];
 }) {
+  const {
+    sortKey: teacherSortKey,
+    sortDir: teacherSortDir,
+    handleSort: handleTeacherSort,
+    sorted: sortedTeachers,
+  } = useSortableTable(teachers ?? [], (t, key) => {
+    if (['avg_stars', 'total_reviews', 'total_penalties'].includes(key)) return Number(t[key] ?? 0);
+    return String(t[key] ?? '');
+  });
+
+  const {
+    sortKey: ratingSortKey,
+    sortDir: ratingSortDir,
+    handleSort: handleRatingSort,
+    sorted: sortedRatings,
+  } = useSortableTable(ratings ?? [], (r, key) => {
+    if (key === 'stars') return Number(r.stars ?? 0);
+    if (key === 'created_at') return new Date(r.created_at ?? 0).getTime();
+    return String(r[key] ?? '');
+  });
+
   return (
     <div className="space-y-6">
       <div className="rounded-xl border border-border bg-card">
@@ -1010,15 +1144,15 @@ export function AdminTeacherAnalyticsPanel({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Teacher ID</TableHead>
-              <TableHead>Họ tên</TableHead>
-              <TableHead>Average rating</TableHead>
-              <TableHead>Tổng review</TableHead>
-              <TableHead>Late cancellations</TableHead>
+              <SortableTableHead label="Teacher ID" sortKey="teacher_id" currentSortKey={teacherSortKey} sortDir={teacherSortDir} onSort={handleTeacherSort} />
+              <SortableTableHead label="Họ tên" sortKey="full_name" currentSortKey={teacherSortKey} sortDir={teacherSortDir} onSort={handleTeacherSort} />
+              <SortableTableHead label="Average rating" sortKey="avg_stars" currentSortKey={teacherSortKey} sortDir={teacherSortDir} onSort={handleTeacherSort} />
+              <SortableTableHead label="Tổng review" sortKey="total_reviews" currentSortKey={teacherSortKey} sortDir={teacherSortDir} onSort={handleTeacherSort} />
+              <SortableTableHead label="Late cancellations" sortKey="total_penalties" currentSortKey={teacherSortKey} sortDir={teacherSortDir} onSort={handleTeacherSort} />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {teachers.map((t) => (
+            {sortedTeachers.map((t) => (
               <TableRow key={t.teacher_id}>
                 <TableCell className="font-mono text-xs">{t.teacher_id}</TableCell>
                 <TableCell>{t.full_name}</TableCell>
@@ -1053,15 +1187,15 @@ export function AdminTeacherAnalyticsPanel({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Thời gian</TableHead>
-              <TableHead>Teacher</TableHead>
-              <TableHead>Học viên</TableHead>
-              <TableHead>Sao</TableHead>
+              <SortableTableHead label="Thời gian" sortKey="created_at" currentSortKey={ratingSortKey} sortDir={ratingSortDir} onSort={handleRatingSort} />
+              <SortableTableHead label="Teacher" sortKey="teacher_name" currentSortKey={ratingSortKey} sortDir={ratingSortDir} onSort={handleRatingSort} />
+              <SortableTableHead label="Học viên" sortKey="student_name" currentSortKey={ratingSortKey} sortDir={ratingSortDir} onSort={handleRatingSort} />
+              <SortableTableHead label="Sao" sortKey="stars" currentSortKey={ratingSortKey} sortDir={ratingSortDir} onSort={handleRatingSort} />
               <TableHead>Nhận xét</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {ratings.map((r) => (
+            {sortedRatings.map((r) => (
               <TableRow key={r.rating_id}>
                 <TableCell className="whitespace-nowrap text-xs">
                   {new Date(r.created_at).toLocaleString()}
@@ -1103,20 +1237,31 @@ export function AdminAuditLogsPanel({
 }: {
   logs: any[];
 }) {
+  const {
+    sortKey: logSortKey,
+    sortDir: logSortDir,
+    handleSort: handleLogSort,
+    sorted: sortedLogs,
+  } = useSortableTable(logs ?? [], (l, key) => {
+    if (key === 'created_at') return new Date(l.created_at ?? 0).getTime();
+    if (key === 'user') return String(l.user_full_name ?? l.user_specific_id ?? '');
+    return String(l[key] ?? '');
+  });
+
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-border bg-card p-4">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Thời gian</TableHead>
-              <TableHead>User</TableHead>
-              <TableHead>Action</TableHead>
+              <SortableTableHead label="Thời gian" sortKey="created_at" currentSortKey={logSortKey} sortDir={logSortDir} onSort={handleLogSort} />
+              <SortableTableHead label="User" sortKey="user" currentSortKey={logSortKey} sortDir={logSortDir} onSort={handleLogSort} />
+              <SortableTableHead label="Action" sortKey="action" currentSortKey={logSortKey} sortDir={logSortDir} onSort={handleLogSort} />
               <TableHead>Details</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {logs.map((log, index) => (
+            {sortedLogs.map((log, index) => (
               <TableRow key={`${log.log_id ?? index}-${log.created_at}`}>
                 <TableCell className="text-xs whitespace-nowrap">
                   {new Date(log.created_at).toLocaleString()}
@@ -1162,31 +1307,27 @@ export function AdminUserManagementPanel({
     updated_at: false,
   });
   const [filterText, setFilterText] = useState("");
-  const [sortBy, setSortBy] = useState<string | null>(null);
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
   const toggleColumn = (key: string) => setVisibleColumns((s) => ({ ...s, [key]: !s[key] }));
 
-  const displayedUsers = (users ?? [])
-    .filter((u: any) => {
-      if (!filterText) return true;
-      const q = filterText.toLowerCase();
-      return (
-        String(u.full_name ?? "").toLowerCase().includes(q) ||
-        String(u.email ?? "").toLowerCase().includes(q) ||
-        String(u.specific_id ?? "").toLowerCase().includes(q) ||
-        String(u.staff_code ?? "").toLowerCase().includes(q) ||
-        String(u.phone ?? "").toLowerCase().includes(q)
-      );
-    })
-    .sort((a: any, b: any) => {
-      if (!sortBy) return 0;
-      const av = (a[sortBy] ?? '') as any;
-      const bv = (b[sortBy] ?? '') as any;
-      if (av === bv) return 0;
-      if (sortDir === 'asc') return av > bv ? 1 : -1;
-      return av > bv ? -1 : 1;
-    });
+  const filteredUsers = (users ?? []).filter((u: any) => {
+    if (!filterText) return true;
+    const q = filterText.toLowerCase();
+    return (
+      String(u.full_name ?? "").toLowerCase().includes(q) ||
+      String(u.email ?? "").toLowerCase().includes(q) ||
+      String(u.specific_id ?? "").toLowerCase().includes(q) ||
+      String(u.staff_code ?? "").toLowerCase().includes(q) ||
+      String(u.phone ?? "").toLowerCase().includes(q)
+    );
+  });
+
+  const {
+    sortKey: userSortKey,
+    sortDir: userSortDir,
+    handleSort: handleUserSort,
+    sorted: displayedUsers,
+  } = useSortableTable(filteredUsers);
   const [editingUser, setEditingUser] = useState<any>(null);
   const [deletingUser, setDeletingUser] = useState<any>(null);
   const [deleteMode, setDeleteMode] = useState<"soft" | "hard">("soft");
@@ -1315,13 +1456,18 @@ export function AdminUserManagementPanel({
                   <TableRow>
                     {colOrder.map((k) =>
                       visibleColumns[k] ? (
-                        <TableHead key={k} onClick={() => {
-                          if (!supportsSort.has(k)) return;
-                          setSortBy(k);
-                          setSortDir(sortBy === k ? (sortDir === 'asc' ? 'desc' : 'asc') : 'asc');
-                        }}>
-                          {labels[k]}
-                        </TableHead>
+                        supportsSort.has(k) ? (
+                          <SortableTableHead
+                            key={k}
+                            label={labels[k]}
+                            sortKey={k}
+                            currentSortKey={userSortKey}
+                            sortDir={userSortDir}
+                            onSort={handleUserSort}
+                          />
+                        ) : (
+                          <TableHead key={k}>{labels[k]}</TableHead>
+                        )
                       ) : null
                     )}
                     <TableHead className="text-right">Hành động</TableHead>
@@ -1585,7 +1731,7 @@ export function AdminClassesPanel({
     { label: "Chủ nhật", v: 0 },
   ];
 
-  const displayed = (classes ?? []).filter((c: any) => {
+  const filteredClasses = (classes ?? []).filter((c: any) => {
     if (!filterText) return true;
     const q = filterText.toLowerCase();
     const match = (v: any) => String(v ?? '').toLowerCase().includes(q);
@@ -1612,6 +1758,21 @@ export function AdminClassesPanel({
 
     // generic column search
     return match((c as any)[searchColumn]);
+  });
+
+  const {
+    sortKey: classesSortKey,
+    sortDir: classesSortDir,
+    handleSort: handleClassesSort,
+    sorted: displayed,
+  } = useSortableTable(filteredClasses, (c, key) => {
+    if (key === 'current_students') return Number(currentStudentCounts?.[c.class_id] ?? c.current_students ?? 0);
+    if (key === 'teacher_id') {
+      const t = (teachers ?? []).find((x:any) => x.teacher_id === c.teacher_id || x.specific_id === c.teacher_id || x.id === c.teacher_id);
+      return String(t?.full_name ?? c.teacher_id ?? '');
+    }
+    if (key === 'schedule_days') return Array.isArray(c.schedule_days) ? c.schedule_days.slice().sort((a:number,b:number)=>a-b).join(',') : '';
+    return c[key] ?? '';
   });
 
   const startCreate = () => {
@@ -1715,7 +1876,7 @@ export function AdminClassesPanel({
         <div className="grid gap-4 lg:grid-cols-2">
           <div className="space-y-1.5">
             <Label>Mã lớp</Label>
-            <Input placeholder="L-OFF-HSK1-NC-0001" value={form.classId} onChange={(e) => setForm((s:any)=>({...s,classId:e.target.value}))} />
+            <Input placeholder="L-OFL-HSK1-NC-0001" value={form.classId} onChange={(e) => setForm((s:any)=>({...s,classId:e.target.value}))} />
           </div>
           <div className="space-y-1.5">
             <Label>Tên lớp</Label>
@@ -1793,9 +1954,9 @@ export function AdminClassesPanel({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="pending">pending</SelectItem>
-                <SelectItem value="active">active</SelectItem>
-                <SelectItem value="completed">completed</SelectItem>
+                <SelectItem value="pending">Chờ khai giảng</SelectItem>
+                <SelectItem value="active">Đang hoạt động</SelectItem>
+                <SelectItem value="completed">Đã hoàn thành</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -1920,7 +2081,16 @@ export function AdminClassesPanel({
             <Table>
               <TableHeader>
                 <TableRow>
-                  {colOrder.map((k) => visibleColumns[k] ? (<TableHead key={k}>{labels[k]}</TableHead>) : null)}
+                  {colOrder.map((k) => visibleColumns[k] ? (
+                    <SortableTableHead
+                      key={k}
+                      label={labels[k]}
+                      sortKey={k}
+                      currentSortKey={classesSortKey}
+                      sortDir={classesSortDir}
+                      onSort={handleClassesSort}
+                    />
+                  ) : null)}
                   <TableHead className="text-right">Hành động</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1957,7 +2127,7 @@ export function AdminClassesPanel({
                         if (k === 'end_time') return <TableCell key={k} className="text-xs">{c.end_time ?? '—'}</TableCell>;
                         if (k === 'max_students') return <TableCell key={k} className="text-xs">{c.max_students ?? '—'}</TableCell>;
                         if (k === 'room_link') return <TableCell key={k} className="text-xs">{c.room_link ? <a href={c.room_link} target="_blank" rel="noreferrer" className="text-primary underline">Link</a> : '—'}</TableCell>;
-                        if (k === 'status') return <TableCell key={k}><span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${c.status === 'active' ? 'bg-emerald-100 text-emerald-700' : c.status === 'completed' ? 'bg-muted text-muted-foreground' : 'bg-yellow-100 text-yellow-800'}`}>{c.status}</span></TableCell>;
+                        if (k === 'status') return <TableCell key={k}><span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${c.status === 'active' ? 'bg-emerald-100 text-emerald-700' : c.status === 'completed' ? 'bg-muted text-muted-foreground' : 'bg-yellow-100 text-yellow-800'}`}>{CLASS_STATUS_LABELS[c.status] ?? c.status}</span></TableCell>;
                         if (k === 'created_at') return <TableCell key={k} className="text-xs">{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</TableCell>;
                         if (k === 'updated_at') return <TableCell key={k} className="text-xs">{c.updated_at ? new Date(c.updated_at).toLocaleString() : '—'}</TableCell>;
                         return null;
