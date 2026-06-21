@@ -32,10 +32,12 @@ export function HSK_AdminPanelView() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<"student" | "teacher" | "logistics" | "care">("student");
+  const [studentAccountType, setStudentAccountType] = useState<"online" | "offline" | "">("");
   const [phone, setPhone] = useState("");
   const [birthDate, setBirthDate] = useState("");
   const [status, setStatus] = useState<"active" | "disabled">("active");
   const [showPassword, setShowPassword] = useState(false);
+  const [hasTriedCreateSubmit, setHasTriedCreateSubmit] = useState(false);
 
   const createUserFn = useServerFn(createCareUser);
   const getAllUsersFn = useServerFn(getAllUsersAdmin);
@@ -114,6 +116,7 @@ export function HSK_AdminPanelView() {
       password: string;
       fullName: string;
       role: "student" | "teacher" | "logistics" | "care";
+      studentAccountType?: "online" | "offline";
       phone: string;
       birthDate?: string;
       birthYear?: number;
@@ -125,9 +128,11 @@ export function HSK_AdminPanelView() {
       setEmail("");
       setPassword("");
       setRole("student");
+      setStudentAccountType("");
       setPhone("");
       setBirthDate("");
       setStatus("active");
+      setHasTriedCreateSubmit(false);
       qc.invalidateQueries({ queryKey: ["admin-users"] });
       qc.invalidateQueries({ queryKey: ["audit"] });
     },
@@ -142,10 +147,28 @@ export function HSK_AdminPanelView() {
     Boolean(birthDate) &&
     !Number.isNaN(birthYearNumber) &&
     birthYearNumber >= 1900 &&
-    birthYearNumber <= new Date().getFullYear();
+    birthYearNumber <= new Date().getFullYear() &&
+    (role !== "student" || Boolean(studentAccountType));
 
-  const hasInput = Boolean(fullName || email || password || phone || birthDate);
-  const showValidationError = !isCreateFormValid && hasInput && !createUserMutation.isSuccess;
+  const showValidationError = hasTriedCreateSubmit && !isCreateFormValid;
+
+  const handleCreateUser = () => {
+    setHasTriedCreateSubmit(true);
+    if (!isCreateFormValid) return;
+
+    createUserMutation.mutate({
+      fullName,
+      email,
+      password,
+      role,
+      studentAccountType: role === "student" ? (studentAccountType as "online" | "offline") : undefined,
+      phone: phone.trim(),
+      birthDate: birthDate || undefined,
+      birthYear: Number.isNaN(birthYearNumber) ? undefined : birthYearNumber,
+      status,
+      staff_code: nextStaffCodeForRole(role),
+    });
+  };
 
   // helper to generate next staff_code based on existing users
   const rolePrefix: Record<string, string> = {
@@ -297,16 +320,16 @@ export function HSK_AdminPanelView() {
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="space-y-1.5">
                 <Label>Họ và tên</Label>
-                <Input value={fullName} onChange={(e) => setFullName(e.target.value)} />
+                <Input name="admin-create-fullname" autoComplete="off" value={fullName} onChange={(e) => setFullName(e.target.value)} />
               </div>
               <div className="space-y-1.5">
                 <Label>Email</Label>
-                <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+                <Input name="admin-create-email" autoComplete="off" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
               </div>
               <div className="space-y-1.5 relative">
                 <Label>Mật khẩu</Label>
                 <div className="relative">
-                  <Input type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} />
+                  <Input name="admin-create-password" autoComplete="new-password" type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} />
                   <Button type="button" variant="ghost" size="icon" className="absolute right-0 top-0 h-9 w-9" onClick={() => setShowPassword(!showPassword)}>
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>
@@ -314,7 +337,11 @@ export function HSK_AdminPanelView() {
               </div>
               <div className="space-y-1.5">
                 <Label>Vai trò</Label>
-                <Select value={role} onValueChange={(value) => setRole(value as typeof role)}>
+                <Select value={role} onValueChange={(value) => {
+                  const nextRole = value as typeof role;
+                  setRole(nextRole);
+                  if (nextRole !== "student") setStudentAccountType("");
+                }}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -326,13 +353,29 @@ export function HSK_AdminPanelView() {
                   </SelectContent>
                 </Select>
               </div>
+              {role === "student" && (
+                <div className="space-y-1.5">
+                  <Label>Loại tài khoản học viên</Label>
+                  <Select value={studentAccountType} onValueChange={(value) => setStudentAccountType(value as "online" | "offline")}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Chọn online hoặc offline" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="online">Online</SelectItem>
+                      <SelectItem value="offline">Offline</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <div className="space-y-1.5">
                 <Label>Số điện thoại</Label>
-                <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
+                <Input name="admin-create-phone" autoComplete="off" value={phone} onChange={(e) => setPhone(e.target.value)} />
               </div>
               <div className="space-y-1.5">
                 <Label>Ngày sinh</Label>
                 <Input
+                  name="admin-create-birthdate"
+                  autoComplete="off"
                   type="date"
                   value={birthDate}
                   onChange={(e) => setBirthDate(e.target.value)}
@@ -353,26 +396,15 @@ export function HSK_AdminPanelView() {
             </div>
             <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <Button
-                onClick={() =>
-                  createUserMutation.mutate({
-                        fullName,
-                        email,
-                        password,
-                        role,
-                        phone: phone.trim(),
-                        birthDate: birthDate || undefined,
-                        birthYear: Number.isNaN(birthYearNumber) ? undefined : birthYearNumber,
-                        status,
-                        staff_code: nextStaffCodeForRole(role),
-                      })
-                }
+                type="button"
+                onClick={handleCreateUser}
                 disabled={createUserMutation.isPending || !isCreateFormValid}
               >
                 Tạo tài khoản mới
               </Button>
               {showValidationError && (
                 <div className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-700">
-                  Xin hãy điền đầy đủ họ tên, email, mật khẩu, số điện thoại và năm sinh hợp lệ.
+                  Xin hãy điền đầy đủ họ tên, email, mật khẩu, số điện thoại, năm sinh hợp lệ{role === "student" ? " và loại tài khoản học viên (online/offline)" : ""}.
                 </div>
               )}
               {createUserMutation.isSuccess && (

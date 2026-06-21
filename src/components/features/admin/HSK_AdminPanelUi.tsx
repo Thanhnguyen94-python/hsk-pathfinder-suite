@@ -1300,6 +1300,7 @@ export function AdminUserManagementPanel({
     full_name: true,
     email: true,
     role: true,
+    student_account_type: true,
     status: true,
     phone: true,
     birth_year: true,
@@ -1334,6 +1335,7 @@ export function AdminUserManagementPanel({
 
   const [editFullName, setEditFullName] = useState("");
   const [editRole, setEditRole] = useState("");
+  const [editStudentAccountType, setEditStudentAccountType] = useState("");
   const [editStatus, setEditStatus] = useState("");
   const [editPhone, setEditPhone] = useState("");
   const [editPassword, setEditPassword] = useState("");
@@ -1344,6 +1346,7 @@ export function AdminUserManagementPanel({
     setEditingUser(user);
     setEditFullName(user.full_name || "");
     setEditRole(user.role || "student");
+    setEditStudentAccountType(user.student_account_type || "");
     setEditStatus(user.status || "active");
     setEditPhone(user.phone || "");
     setEditPassword("");
@@ -1360,6 +1363,7 @@ export function AdminUserManagementPanel({
     const payload: any = { id: editingUser.id };
     if (editFullName !== editingUser.full_name) payload.fullName = editFullName;
     if (editRole !== editingUser.role) payload.role = editRole;
+    if (editStudentAccountType !== (editingUser.student_account_type || "")) payload.studentAccountType = editStudentAccountType || null;
     if (editStatus !== editingUser.status) payload.status = editStatus;
     if (editPhone !== editingUser.phone) payload.phone = editPhone;
     if (editPassword) payload.password = editPassword;
@@ -1379,7 +1383,7 @@ export function AdminUserManagementPanel({
 
   // export displayed users as CSV
   const exportCsv = () => {
-    const cols = ['specific_id','staff_code','full_name','email','role','status','phone','birth_year','created_at','updated_at'];
+    const cols = ['specific_id','staff_code','full_name','email','role','student_account_type','status','phone','birth_year','created_at','updated_at'];
     const rows = displayedUsers.map((u: any) => cols.map((c) => (c === 'birth_year' ? csvEscape(formatBirthDateCell(u.birth_year)) : csvEscape(u[c] ?? ''))).join(','));
     const header = cols.map((c) => csvEscape(c)).join(',');
     const csv = [header, ...rows].join('\n');
@@ -1410,6 +1414,7 @@ export function AdminUserManagementPanel({
                       { key: 'full_name', label: 'Họ tên' },
                       { key: 'email', label: 'Email' },
                       { key: 'role', label: 'Vai trò' },
+                      { key: 'student_account_type', label: 'Loại học viên' },
                       { key: 'status', label: 'Trạng thái' },
                       { key: 'phone', label: 'Số điện thoại' },
                       { key: 'birth_year', label: 'Năm sinh' },
@@ -1434,13 +1439,14 @@ export function AdminUserManagementPanel({
         </div>
         <div className="overflow-x-auto">
           {(() => {
-            const colOrder = ['staff_code','specific_id','full_name','email','role','status','phone','birth_year','created_at','updated_at'];
+            const colOrder = ['staff_code','specific_id','full_name','email','role','student_account_type','status','phone','birth_year','created_at','updated_at'];
             const labels: Record<string,string> = {
               staff_code: 'Mã nhân viên',
               specific_id: 'Specific ID',
               full_name: 'Họ tên',
               email: 'Email',
               role: 'Vai trò',
+              student_account_type: 'Loại học viên',
               status: 'Trạng thái',
               phone: 'Số điện thoại',
               birth_year: 'Năm sinh',
@@ -1449,7 +1455,7 @@ export function AdminUserManagementPanel({
             };
             const visibleKeys = colOrder.filter((k) => visibleColumns[k]);
             const visibleCount = visibleKeys.length;
-            const supportsSort = new Set(['specific_id','staff_code','full_name','email','role','status','birth_year','created_at','updated_at']);
+            const supportsSort = new Set(['specific_id','staff_code','full_name','email','role','student_account_type','status','birth_year','created_at','updated_at']);
             return (
               <Table>
                 <TableHeader>
@@ -1490,6 +1496,7 @@ export function AdminUserManagementPanel({
                           if (k === 'full_name') return <TableCell key={k} className="font-medium">{u.full_name}</TableCell>;
                           if (k === 'email') return <TableCell key={k}>{u.email}</TableCell>;
                           if (k === 'role') return <TableCell key={k} className="capitalize">{u.role}</TableCell>;
+                          if (k === 'student_account_type') return <TableCell key={k} className="capitalize">{u.student_account_type ?? '—'}</TableCell>;
                           if (k === 'status') return (
                             <TableCell key={k}>
                               <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${u.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-destructive/10 text-destructive'}`}>
@@ -1568,7 +1575,10 @@ export function AdminUserManagementPanel({
             </div>
             <div className="space-y-1.5">
               <Label>Vai trò</Label>
-              <Select value={editRole} onValueChange={setEditRole}>
+              <Select value={editRole} onValueChange={(value) => {
+                setEditRole(value);
+                if (value !== 'student') setEditStudentAccountType('');
+              }}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -1581,6 +1591,20 @@ export function AdminUserManagementPanel({
                 </SelectContent>
               </Select>
             </div>
+            {editRole === 'student' && (
+              <div className="space-y-1.5">
+                <Label>Loại tài khoản học viên</Label>
+                <Select value={editStudentAccountType} onValueChange={setEditStudentAccountType}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Chọn online hoặc offline" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="online">Online</SelectItem>
+                    <SelectItem value="offline">Offline</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label>Trạng thái</Label>
               <Select value={editStatus} onValueChange={setEditStatus}>

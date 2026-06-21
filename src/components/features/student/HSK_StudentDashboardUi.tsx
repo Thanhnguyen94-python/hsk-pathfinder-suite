@@ -37,7 +37,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, CheckCircle2 } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2 } from "lucide-react";
 import type { HSKSlot } from "@/types/hsk-models/hsk-booking.types";
 
 // ─── Cancel Confirmation Dialog ───────────────────────────────────────────────
@@ -234,7 +234,7 @@ export function BookingsTable({
   const [dateRangeFilter, setDateRangeFilter] = useState<"all" | "week" | "month" | "custom">("all");
   const [customDateFrom, setCustomDateFrom] = useState("");
   const [customDateTo, setCustomDateTo] = useState("");
-  const [sortBy, setSortBy] = useState<"session_date" | "status" | "teacher_name">("session_date");
+  const [sortBy, setSortBy] = useState<"class_id" | "course_name" | "session_date" | "status" | "teacher_name">("session_date");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
@@ -264,6 +264,11 @@ export function BookingsTable({
     if (b === null || b === undefined || b === "") return -1;
     if (typeof a === "number" && typeof b === "number") return a - b;
     return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
+  };
+
+  const renderSortIcon = (field: "class_id" | "course_name" | "session_date" | "status" | "teacher_name") => {
+    if (sortBy !== field) return <ArrowUpDown className="h-3.5 w-3.5" />;
+    return sortDirection === "asc" ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />;
   };
 
   const filteredBookings = useMemo(() => {
@@ -306,7 +311,13 @@ export function BookingsTable({
       let aValue: string | number | null = null;
       let bValue: string | number | null = null;
 
-      if (sortBy === "session_date") {
+      if (sortBy === "class_id") {
+        aValue = a.class_id ?? "";
+        bValue = b.class_id ?? "";
+      } else if (sortBy === "course_name") {
+        aValue = a.course_name ?? a.class_id ?? "";
+        bValue = b.course_name ?? b.class_id ?? "";
+      } else if (sortBy === "session_date") {
         aValue = parseIsoDate(a.session_date)?.getTime() ?? 0;
         bValue = parseIsoDate(b.session_date)?.getTime() ?? 0;
       } else if (sortBy === "status") {
@@ -331,7 +342,7 @@ export function BookingsTable({
     return sortedBookings.slice(start, start + rowsPerPage);
   }, [currentPage, rowsPerPage, sortedBookings]);
 
-  const handleSort = (field: "session_date" | "status" | "teacher_name") => {
+  const handleSort = (field: "class_id" | "course_name" | "session_date" | "status" | "teacher_name") => {
     if (sortBy === field) {
       setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
     } else {
@@ -460,16 +471,34 @@ export function BookingsTable({
         <Table className="min-w-[1000px]">
           <TableHeader>
             <TableRow>
-              <TableHead className="min-w-[180px] whitespace-nowrap">Slot</TableHead>
-              <TableHead className="min-w-[120px] whitespace-nowrap">Khoá học</TableHead>
+              <TableHead className="min-w-[180px] whitespace-nowrap">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
+                  onClick={() => handleSort("class_id")}
+                >
+                  Mã lớp
+                  {renderSortIcon("class_id")}
+                </button>
+              </TableHead>
+              <TableHead className="min-w-[180px] whitespace-nowrap">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
+                  onClick={() => handleSort("course_name")}
+                >
+                  Tên lớp
+                  {renderSortIcon("course_name")}
+                </button>
+              </TableHead>
               <TableHead className="min-w-[150px] whitespace-nowrap">
                 <button
                   type="button"
                   className="inline-flex items-center gap-1 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
                   onClick={() => handleSort("teacher_name")}
                 >
-                  Giáo viên
-                  {sortBy === "teacher_name" ? (sortDirection === "asc" ? "▲" : "▼") : ""}
+                  Tên giáo viên
+                  {renderSortIcon("teacher_name")}
                 </button>
               </TableHead>
               <TableHead className="min-w-[160px] whitespace-nowrap">
@@ -478,8 +507,8 @@ export function BookingsTable({
                   className="inline-flex items-center gap-1 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
                   onClick={() => handleSort("session_date")}
                 >
-                  Bắt đầu
-                  {sortBy === "session_date" ? (sortDirection === "asc" ? "▲" : "▼") : ""}
+                  Thời gian bắt đầu
+                  {renderSortIcon("session_date")}
                 </button>
               </TableHead>
               <TableHead className="min-w-[160px] whitespace-nowrap">Kết thúc (thực tế)</TableHead>
@@ -493,7 +522,7 @@ export function BookingsTable({
                   onClick={() => handleSort("status")}
                 >
                   Trạng thái
-                  {sortBy === "status" ? (sortDirection === "asc" ? "▲" : "▼") : ""}
+                  {renderSortIcon("status")}
                 </button>
               </TableHead>
               <TableHead className="min-w-[120px] whitespace-nowrap"></TableHead>
@@ -502,13 +531,13 @@ export function BookingsTable({
           <TableBody>
             {paginatedBookings.map((b) => (
               <TableRow key={b.slot_id}>
-                <TableCell className="font-mono text-xs whitespace-nowrap">{b.slot_id}</TableCell>
-                <TableCell className="font-medium whitespace-nowrap">{b.course_name ?? b.class_id}</TableCell>
+                <TableCell className="font-mono text-xs whitespace-nowrap">{b.class_id ?? "—"}</TableCell>
+                <TableCell className="font-medium whitespace-nowrap">{b.course_name ?? b.class_id ?? "—"}</TableCell>
                 <TableCell className="whitespace-nowrap">
                   {b.teacher_name ? (
                     <>
                       <div className="font-medium">{b.teacher_name}</div>
-                      <div className="font-mono text-xs text-muted-foreground">{b.teacher_id}</div>
+                      <div className="font-mono text-xs text-muted-foreground">{b.teacher_staff_code ?? b.teacher_id}</div>
                     </>
                   ) : (
                     <span className="text-muted-foreground">Chờ nhận</span>
@@ -545,10 +574,10 @@ export function BookingsTable({
                   )}
                 </TableCell>
                 <TableCell className="whitespace-nowrap">
-                  <StatusBadge status={b.status} />
+                  <StatusBadge booking={b} />
                 </TableCell>
                 <TableCell className="space-x-2 whitespace-nowrap">
-                  {(b.status === "pending" || b.status === "confirmed") && new Date(b.session_date) > new Date() && (
+                  {!b.is_enrollment_only && (b.status === "pending" || b.status === "confirmed") && new Date(b.session_date) > new Date() && (
                     <Button
                       id={`btn-cancel-${b.slot_id}`}
                       size="sm"
@@ -559,11 +588,14 @@ export function BookingsTable({
                       Huỷ
                     </Button>
                   )}
-                  {b.teacher_id && new Date(b.session_date) <= new Date() && (b.status === "confirmed" || b.status === "pending") && !ratedSlots.has(b.slot_id) && (
+                  {!b.is_enrollment_only && b.teacher_id && new Date(b.session_date) <= new Date() && (b.status === "confirmed" || b.status === "pending") && !ratedSlots.has(b.slot_id) && (
                     <RatingDialog slotId={b.slot_id} teacherId={b.teacher_id} />
                   )}
-                  {ratedSlots.has(b.slot_id) && (
+                  {!b.is_enrollment_only && ratedSlots.has(b.slot_id) && (
                     <span className="text-xs text-success">Đã đánh giá</span>
+                  )}
+                  {b.is_enrollment_only && (
+                    <span className="text-xs text-muted-foreground">Lớp đã gán</span>
                   )}
                 </TableCell>
               </TableRow>
@@ -890,17 +922,33 @@ export function AssignmentsTable({
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    pending: "bg-warning/15 text-warning-foreground",
-    confirmed: "bg-success/10 text-success",
-    cancelled_valid: "bg-muted text-muted-foreground",
-    cancelled_late: "bg-destructive/10 text-destructive",
-  };
+function StatusBadge({ booking }: { booking: HSKSlot }) {
+  const now = Date.now();
+  const start = new Date(booking.session_date).getTime();
+  const hasActualEnd = !!booking.actual_end_time;
+  const end = hasActualEnd
+    ? new Date(booking.actual_end_time as string).getTime()
+    : start + 90 * 60 * 1000; // fallback 90 phút nếu chưa có giờ kết thúc
+
+  const rawStatus = String(booking.status ?? "").toLowerCase();
+
+  let label = "Sắp diễn ra";
+  let className = "bg-primary/15 text-primary ring-1 ring-primary/30";
+
+  if (rawStatus.includes("cancelled")) {
+    label = "Đã huỷ";
+    className = "bg-destructive/10 text-destructive";
+  } else if (now >= start && now <= end) {
+    label = "Đang diễn ra";
+    className = "bg-warning/15 text-warning-foreground ring-1 ring-warning/30";
+  } else if (now > end) {
+    label = "Hoàn thành";
+    className = "bg-success/10 text-success";
+  }
 
   return (
-    <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${map[status] ?? ""}`}>
-      {status}
+    <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${className}`}>
+      {label}
     </span>
   );
 }

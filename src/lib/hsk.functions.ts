@@ -3,6 +3,57 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
+type AppRole = "admin" | "logistics" | "teacher" | "student" | "care";
+
+const ROLE_ALIASES: Record<string, AppRole> = {
+  admin: "admin",
+  logistics: "logistics",
+  teacher: "teacher",
+  student: "student",
+  care: "care",
+};
+
+const normalizeRole = (role: unknown): AppRole | string => {
+  const value = String(role ?? "").trim().toLowerCase();
+  return ROLE_ALIASES[value] ?? value;
+};
+
+const getCurrentUserRow = async (context: any) => {
+  if (!context?.userId) {
+    throw new Error("Unauthorized");
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("users")
+    .select("id, role, specific_id, full_name, email, status, student_account_type")
+    .eq("id", context.userId)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  if (!data) {
+    throw new Error(`User profile not found in public.users for auth ID: ${context.userId}`);
+  }
+
+  return data;
+};
+
+const assertAdminContext = async (context: any) => {
+  const me = await getCurrentUserRow(context);
+  if (normalizeRole(me.role) !== "admin") {
+    throw new Error("Forbidden");
+  }
+  return me;
+};
+
+const assertAdminOrCareContext = async (context: any) => {
+  const me = await getCurrentUserRow(context);
+  const role = normalizeRole(me.role);
+  if (role !== "admin" && role !== "care") {
+    throw new Error("Forbidden");
+  }
+  return me;
+};
+
 // ---------- Bookings ----------
 
 export const claimSlot = createServerFn({ method: "POST" })
@@ -277,7 +328,7 @@ export const getMyRole = createServerFn({ method: "GET" })
       .maybeSingle();
     if (error) throw new Error(error.message);
     return {
-      role: (data?.role as string) ?? "student",
+      role: normalizeRole(data?.role) || "student",
       fullName: (data?.full_name as string) ?? null,
       specificId: (data?.specific_id as string) ?? null,
     };
@@ -288,35 +339,145 @@ export const getMyRole = createServerFn({ method: "GET" })
 export const getMe = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+    const { data, error } = await supabaseAdmin
       .from("users")
-      .select("id, specific_id, full_name, email, role")
-      .single();
+      .select("id, specific_id, staff_code, full_name, email, role, student_account_type")
+      .eq("id", context.userId)
+      .maybeSingle();
     if (error) throw new Error(error.message);
-    return data;
+
+    const claims = (context?.claims ?? {}) as any;
+    const claimEmail = typeof claims?.email === "string" ? claims.email : null;
+    const claimRole =
+      typeof claims?.user_metadata?.role === "string"
+        ? claims.user_metadata.role
+        : typeof claims?.app_metadata?.role === "string"
+          ? claims.app_metadata.role
+          : null;
+    const claimFullName =
+      typeof claims?.user_metadata?.full_name === "string"
+        ? claims.user_metadata.full_name
+        : typeof claims?.user_metadata?.name === "string"
+          ? claims.user_metadata.name
+          : null;
+
+    return {
+      id: data?.id ?? context.userId,
+      specific_id: data?.specific_id ?? null,
+      staff_code: data?.staff_code ?? null,
+      full_name: data?.full_name ?? claimFullName,
+      email: data?.email ?? claimEmail,
+      role: normalizeRole(data?.role ?? claimRole ?? "student"),
+      student_account_type: data?.student_account_type ?? null,
+    };
   });
 
 export const getStudentDashboard = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { supabase } = context;
-    const [progress, bookings, users] = await Promise.all([
-      supabase.from("student_progress").select("*"),
-      supabase
+    const { data: me, error: meErr } = await supabaseAdmin
+      .from("users")
+      .select("specific_id")
+      .eq("id", context.userId)
+      .maybeSingle();
+    if (meErr) throw new Error(meErr.message);
+    if (!me?.specific_id) throw new Error("User profile not found");
+
+    const [progress, bookings] = await Promise.all([
+      supabaseAdmin
+        .from("student_progress")
+        .select("*")
+        .eq("student_id", me.specific_id),
+      supabaseAdmin
         .from("bookings")
         .select("*")
+        .eq("student_id", me.specific_id)
         .order("session_date", { ascending: true })
-        .limit(50),
-      supabase.from("users").select("specific_id, full_name"),
+        .limit(200),
     ]);
-    if (progress.error) throw new Error(progress.error.message);
-    if (bookings.error) throw new Error(bookings.error.message);
+
+    const isMissingTableError = (message: string) =>
+      message.includes("Could not find the table") ||
+      message.includes("does not exist") ||
+      message.includes("42P01");
+
+    if (progress.error && !isMissingTableError(String(progress.error.message ?? progress.error))) {
+      throw new Error(progress.error.message);
+    }
+    if (bookings.error && !isMissingTableError(String(bookings.error.message ?? bookings.error))) {
+      throw new Error(bookings.error.message);
+    }
+
+    // Try richest enrollment payload first; fallback to schema-tolerant shapes.
+    let enrollmentsRows: any[] = [];
+    {
+      const rich = await supabaseAdmin
+        .from("class_enrollments")
+        .select(`class_id, enrolled_at, classes ( class_name, course_id, type, teacher_id, start_date, end_date, start_time, end_time, schedule_days )`)
+        .eq("student_id", me.specific_id);
+
+      if (!rich.error) {
+        enrollmentsRows = rich.data ?? [];
+      } else {
+        const basicJoin = await supabaseAdmin
+          .from("class_enrollments")
+          .select(`class_id, enrolled_at, classes(*)`)
+          .eq("student_id", me.specific_id);
+
+        if (!basicJoin.error) {
+          enrollmentsRows = basicJoin.data ?? [];
+        } else {
+          const bare = await supabaseAdmin
+            .from("class_enrollments")
+            .select("class_id, enrolled_at")
+            .eq("student_id", me.specific_id);
+
+          if (bare.error && !isMissingTableError(String(bare.error.message ?? bare.error))) {
+            throw new Error(bare.error.message);
+          }
+          enrollmentsRows = bare.data ?? [];
+        }
+      }
+    }
+
+    const teacherIds = Array.from(
+      new Set([
+        ...(bookings.data ?? []).map((b: any) => b.teacher_id).filter(Boolean),
+        ...enrollmentsRows.map((r: any) => r?.classes?.teacher_id).filter(Boolean),
+      ]),
+    ) as string[];
+    const users = teacherIds.length
+      ? await supabaseAdmin
+          .from("users")
+          .select("specific_id, full_name, staff_code")
+          .in("specific_id", teacherIds)
+      : { data: [], error: null };
+    if (users.error) throw new Error(users.error.message);
+
     const nameMap = new Map((users.data ?? []).map((u: any) => [u.specific_id, u.full_name]));
+    const teacherCodeMap = new Map((users.data ?? []).map((u: any) => [u.specific_id, u.staff_code]));
     return {
       progress: progress.data ?? [],
       bookings: (bookings.data ?? []).map((b: any) => ({
         ...b,
         teacher_name: b.teacher_id ? nameMap.get(b.teacher_id) ?? null : null,
+        teacher_staff_code: b.teacher_id ? teacherCodeMap.get(b.teacher_id) ?? null : null,
+      })),
+      enrollments: enrollmentsRows.map((row: any) => ({
+        class_id: row.class_id,
+        enrolled_at: row.enrolled_at,
+        class_name: row.classes?.class_name ?? null,
+        course_id: row.classes?.course_id ?? null,
+        class_type: row.classes?.type ?? null,
+        teacher_id: row.classes?.teacher_id ?? null,
+        teacher_name: row.classes?.teacher_id ? nameMap.get(row.classes.teacher_id) ?? null : null,
+        teacher_staff_code: row.classes?.teacher_id ? teacherCodeMap.get(row.classes.teacher_id) ?? null : null,
+        start_date: row.classes?.start_date ?? null,
+        end_date: row.classes?.end_date ?? null,
+        start_time: row.classes?.start_time ?? null,
+        end_time: row.classes?.end_time ?? null,
+        schedule_days: row.classes?.schedule_days ?? null,
+        total_lessons: row.classes?.total_lessons ?? null,
       })),
     };
   });
@@ -403,9 +564,18 @@ export const rateTeacher = createServerFn({ method: "POST" })
 export const getMyRatings = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+    const { data: me, error: meErr } = await supabaseAdmin
+      .from("users")
+      .select("specific_id")
+      .eq("id", context.userId)
+      .maybeSingle();
+    if (meErr) throw new Error(meErr.message);
+    if (!me?.specific_id) return [];
+
+    const { data, error } = await supabaseAdmin
       .from("teacher_ratings")
-      .select("slot_id, stars, comment, created_at, teacher_id");
+      .select("slot_id, stars, comment, created_at, teacher_id")
+      .eq("student_id", me.specific_id);
     if (error) throw new Error(error.message);
     return data ?? [];
   });
@@ -511,6 +681,47 @@ export const listAssignments = createServerFn({ method: "GET" })
     return data ?? [];
   });
 
+export const listMyAssignments = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data: me, error: meErr } = await supabaseAdmin
+      .from("users")
+      .select("specific_id")
+      .eq("id", context.userId)
+      .maybeSingle();
+    if (meErr) throw new Error(meErr.message);
+    if (!me?.specific_id) return [];
+
+    const { data: progressRows, error: progressErr } = await supabaseAdmin
+      .from("student_progress")
+      .select("course_id")
+      .eq("student_id", me.specific_id);
+    if (progressErr) {
+      const msg = String(progressErr.message ?? progressErr);
+      if (
+        msg.includes("Could not find the table") ||
+        msg.includes("does not exist") ||
+        msg.includes("42P01")
+      ) {
+        return [];
+      }
+      throw new Error(progressErr.message);
+    }
+
+    const courseIds = Array.from(
+      new Set((progressRows ?? []).map((r: any) => String(r.course_id)).filter(Boolean)),
+    );
+    if (courseIds.length === 0) return [];
+
+    const { data, error } = await supabaseAdmin
+      .from("assignments")
+      .select("*")
+      .in("course_id", courseIds)
+      .order("deadline", { ascending: true });
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  });
+
 export const createAssignment = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) =>
@@ -574,6 +785,30 @@ export const listSubmissions = createServerFn({ method: "GET" })
     return (subs.data ?? []).map((s: any) => ({
       ...s,
       student_name: nameMap.get(s.student_id) ?? null,
+    }));
+  });
+
+export const listMySubmissions = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data: me, error: meErr } = await supabaseAdmin
+      .from("users")
+      .select("specific_id, full_name")
+      .eq("id", context.userId)
+      .maybeSingle();
+    if (meErr) throw new Error(meErr.message);
+    if (!me?.specific_id) return [];
+
+    const { data, error } = await supabaseAdmin
+      .from("assignment_submissions")
+      .select("*, assignments(title, course_id, deadline)")
+      .eq("student_id", me.specific_id)
+      .order("submitted_at", { ascending: false });
+    if (error) throw new Error(error.message);
+
+    return (data ?? []).map((s: any) => ({
+      ...s,
+      student_name: me.full_name ?? null,
     }));
   });
 
@@ -686,10 +921,7 @@ export const createRecurringBookings = createServerFn({ method: "POST" })
 export const getAllClassesAdmin = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    // require admin role first
-    const { data: me, error: meErr } = await supabaseAdmin.from("users").select("role").eq("id", context.userId).maybeSingle();
-    if (meErr) throw new Error(meErr.message);
-    if (!me || me.role !== "admin") throw new Error("Unauthorized");
+    await assertAdminContext(context);
     const { data, error } = await supabaseAdmin.from("classes").select("*");
     if (error) throw new Error(error.message);
     return data ?? [];
@@ -700,9 +932,7 @@ export const getAllClassesAdmin = createServerFn({ method: "GET" })
     .middleware([requireSupabaseAuth])
     .inputValidator((d) => z.object({ classId: z.string().min(1) }).parse(d))
     .handler(async ({ data, context }) => {
-      const { data: me, error: meErr } = await supabaseAdmin.from("users").select("role").eq("id", context.userId).maybeSingle();
-      if (meErr) throw new Error(meErr.message);
-      if (!me || me.role !== "admin") throw new Error("Unauthorized");
+      await assertAdminContext(context);
       const { data: row, error } = await supabaseAdmin.from("classes").select("*").eq("class_id", data.classId).maybeSingle();
       if (error) throw new Error(error.message);
       return row ?? null;
@@ -713,9 +943,7 @@ export const getAllClassesAdmin = createServerFn({ method: "GET" })
     .middleware([requireSupabaseAuth])
     .inputValidator((d) => z.object({ classId: z.string().min(1) }).parse(d))
     .handler(async ({ data, context }) => {
-      const { data: me, error: meErr } = await supabaseAdmin.from("users").select("role").eq("id", context.userId).maybeSingle();
-      if (meErr) throw new Error(meErr.message);
-      if (!me || me.role !== "admin") throw new Error("Unauthorized");
+      await assertAdminContext(context);
       // Query enrollments — if the table doesn't exist the client may return
       // a descriptive error (map that to a migration guidance message).
       const { data: rows, error } = await supabaseAdmin
@@ -738,9 +966,7 @@ export const getAllClassesAdmin = createServerFn({ method: "GET" })
     .middleware([requireSupabaseAuth])
     .inputValidator((d) => z.object({ studentId: z.string().min(1) }).parse(d))
     .handler(async ({ data, context }) => {
-      const { data: me, error: meErr } = await supabaseAdmin.from("users").select("role").eq("id", context.userId).maybeSingle();
-      if (meErr) throw new Error(meErr.message);
-      if (!me || me.role !== "admin") throw new Error("Unauthorized");
+      await assertAdminContext(context);
       // Query classes that student is enrolled in. Map missing-table errors
       // to a clear migration guidance message so the operator can apply
       // the SQL migrations if needed.
@@ -763,9 +989,7 @@ export const getAllClassesAdmin = createServerFn({ method: "GET" })
     .middleware([requireSupabaseAuth])
     .inputValidator((d) => z.object({ q: z.string().optional() }).parse(d))
     .handler(async ({ data, context }) => {
-      const { data: me, error: meErr } = await supabaseAdmin.from("users").select("role").eq("id", context.userId).maybeSingle();
-      if (meErr) throw new Error(meErr.message);
-      if (!me || me.role !== "admin") throw new Error("Unauthorized");
+      await assertAdminContext(context);
       const q = String(data.q ?? "").trim();
       if (!q) return [];
       const like = `%${q.replace(/%/g, "\\%").replace(/_/g, "\\_")}%`;
@@ -798,9 +1022,7 @@ export const getAllClassesAdmin = createServerFn({ method: "GET" })
     .middleware([requireSupabaseAuth])
     .inputValidator((d) => z.object({ classId: z.string().min(1), studentId: z.string().min(1) }).parse(d))
     .handler(async ({ data, context }) => {
-      const { data: me, error: meErr } = await supabaseAdmin.from("users").select("role").eq("id", context.userId).maybeSingle();
-      if (meErr) throw new Error(meErr.message);
-      if (!me || me.role !== "admin") throw new Error("Unauthorized");
+      await assertAdminContext(context);
       // Attempt delete; surface a helpful message when the enrollment table
       // is missing in the DB (common when migrations haven't been applied).
       const { data: delData, error } = await supabaseAdmin.from("class_enrollments").delete().eq("class_id", data.classId).eq("student_id", data.studentId).select().maybeSingle();
@@ -865,9 +1087,7 @@ export const createClassAdmin = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { data: me, error: meErr } = await supabaseAdmin.from("users").select("role").eq("id", context.userId).maybeSingle();
-    if (meErr) throw new Error(meErr.message);
-    if (!me || me.role !== "admin") throw new Error("Unauthorized");
+    await assertAdminContext(context);
 
     const payload = {
       class_id: data.classId,
@@ -899,9 +1119,7 @@ export const updateClassAdmin = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { data: me, error: meErr } = await supabaseAdmin.from("users").select("role, specific_id").eq("id", context.userId).maybeSingle();
-    if (meErr) throw new Error(meErr.message);
-    if (!me || me.role !== "admin") throw new Error("Unauthorized");
+    const me = await assertAdminContext(context);
 
     const updates: any = {};
     const allowed = [
@@ -1000,9 +1218,7 @@ export const deleteClassAdmin = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => z.object({ classId: z.string().min(1) }).parse(d))
   .handler(async ({ data, context }) => {
-    const { data: me, error: meErr } = await supabaseAdmin.from("users").select("role").eq("id", context.userId).maybeSingle();
-    if (meErr) throw new Error(meErr.message);
-    if (!me || me.role !== "admin") throw new Error("Unauthorized");
+    await assertAdminContext(context);
 
     const { data: row, error } = await supabaseAdmin.from("classes").delete().eq("class_id", data.classId).select().single();
     if (error) throw new Error(error.message);
@@ -1020,9 +1236,7 @@ export const getClassEventsAdmin = createServerFn({ method: "GET" })
     }).parse(d)
   )
   .handler(async ({ data, context }) => {
-    const { data: me, error: meErr } = await supabaseAdmin.from("users").select("role").eq("id", context.userId).maybeSingle();
-    if (meErr) throw new Error(meErr.message);
-    if (!me || me.role !== "admin") throw new Error("Unauthorized");
+    await assertAdminContext(context);
     const { data: rows, error } = await supabaseAdmin.rpc("get_class_events", {
       p_class_id: data.classId,
       p_limit: data.limit ?? 100,
@@ -1050,9 +1264,7 @@ export const createClassEventAdmin = createServerFn({ method: "POST" })
     }).parse(d)
   )
   .handler(async ({ data, context }) => {
-    const { data: me, error: meErr } = await supabaseAdmin.from("users").select("role, specific_id").eq("id", context.userId).maybeSingle();
-    if (meErr) throw new Error(meErr.message);
-    if (!me || me.role !== "admin") throw new Error("Unauthorized");
+    const me = await assertAdminContext(context);
     const { error } = await supabaseAdmin.from("class_events").insert({
       class_id: data.classId,
       event_type: data.eventType,
@@ -1100,28 +1312,23 @@ export const createCareUser = createServerFn({ method: "POST" })
         password: z.string().min(6),
         fullName: z.string().min(1),
         role: z.enum(["student", "teacher", "logistics", "care"]),
+        studentAccountType: z.enum(["online", "offline"]).optional(),
         staff_code: z.string().optional(),
         phone: z.string().min(6).max(32),
         birthDate: z.string().optional(),
         birthYear: z.number().int().min(1900).max(new Date().getFullYear()).optional(),
         status: z.enum(["active", "disabled"]).default("active"),
+      }).superRefine((value, ctx) => {
+        if (value.role === "student" && !value.studentAccountType) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["studentAccountType"], message: "Student account type is required for students" });
+        }
       })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    // Sử dụng supabaseAdmin để bypass RLS khi check role của admin,
-    // đảm bảo không bị lỗi do RLS block.
-    const { data: me, error: meErr } = await supabaseAdmin
-      .from("users")
-      .select("role")
-      .eq("id", context.userId)
-      .maybeSingle();
-    if (meErr) throw new Error(meErr.message);
+    const me = await assertAdminOrCareContext(context);
     if (!me) {
       throw new Error(`User profile not found in public.users for auth ID: ${context.userId}. Please check database.`);
-    }
-    if (!["admin", "care"].includes(me.role)) {
-      throw new Error("Forbidden");
     }
 
     const { data: authResult, error } = await supabaseAdmin.auth.admin.createUser({
@@ -1131,6 +1338,7 @@ export const createCareUser = createServerFn({ method: "POST" })
       user_metadata: {
         full_name: data.fullName,
         role: data.role,
+        ...(data.studentAccountType ? { student_account_type: data.studentAccountType } : {}),
       },
     });
 
@@ -1143,6 +1351,7 @@ export const createCareUser = createServerFn({ method: "POST" })
       email: data.email,
       status: data.status,
       role: data.role,
+      student_account_type: data.role === "student" ? data.studentAccountType : null,
       // set staff_code either from caller or generated by DB RPC for safety
       staff_code: undefined,
     };
@@ -1246,19 +1455,12 @@ export const revealUserPii = createServerFn({ method: "POST" })
 export const getAllUsersAdmin = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    // Ensure caller is an admin by checking public.users via service role
-    const { data: meRow, error: meErr } = await supabaseAdmin
-      .from("users")
-      .select("role")
-      .eq("id", context.userId)
-      .maybeSingle();
-    if (meErr) throw new Error(meErr.message);
-    if (!meRow || meRow.role !== 'admin') throw new Error('Forbidden');
+    await assertAdminContext(context);
 
     // Use service client to bypass RLS and return all public.users rows
     const { data, error } = await supabaseAdmin
       .from("users")
-      .select("id, specific_id, staff_code, full_name, email, role, status, phone, birth_year, created_at, updated_at")
+      .select("id, specific_id, staff_code, full_name, email, role, status, phone, birth_year, student_account_type, created_at, updated_at")
       .order("created_at", { ascending: false })
       .limit(1000);
     if (error) throw new Error(error.message);
@@ -1277,12 +1479,13 @@ export const updateUserAdmin = createServerFn({ method: "POST" })
         phone: z.string().optional(),
         birthDate: z.string().optional(),
         birthYear: z.number().int().optional(),
+        studentAccountType: z.enum(["online", "offline"]).nullable().optional(),
         password: z.string().min(6).optional(),
       })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { id, fullName, role, status, phone, birthDate, birthYear, password } = data;
+    const { id, fullName, role, status, phone, birthDate, birthYear, password, studentAccountType } = data;
 
     // Update auth metadata and/or password via service client when available
     try {
@@ -1292,7 +1495,11 @@ export const updateUserAdmin = createServerFn({ method: "POST" })
           const updatePayload: any = {};
           if (password) updatePayload.password = password;
           if (fullName || role)
-            updatePayload.user_metadata = { ...(fullName ? { full_name: fullName } : {}), ...(role ? { role } : {}) };
+            updatePayload.user_metadata = {
+              ...(fullName ? { full_name: fullName } : {}),
+              ...(role ? { role } : {}),
+              ...(studentAccountType !== undefined ? { student_account_type: studentAccountType } : {}),
+            };
           // call updateUserById on service client
           await adminApi.updateUserById(id, updatePayload);
         } else if (adminApi && typeof adminApi.updateUser === "function") {
@@ -1300,7 +1507,11 @@ export const updateUserAdmin = createServerFn({ method: "POST" })
           const updatePayload: any = {};
           if (password) updatePayload.password = password;
           if (fullName || role)
-            updatePayload.user_metadata = { ...(fullName ? { full_name: fullName } : {}), ...(role ? { role } : {}) };
+            updatePayload.user_metadata = {
+              ...(fullName ? { full_name: fullName } : {}),
+              ...(role ? { role } : {}),
+              ...(studentAccountType !== undefined ? { student_account_type: studentAccountType } : {}),
+            };
           await adminApi.updateUser(id, updatePayload as any);
         }
       }
@@ -1309,6 +1520,12 @@ export const updateUserAdmin = createServerFn({ method: "POST" })
       console.warn("Admin auth update failed:", (e as any)?.message ?? e);
     }
 
+    const { data: currentUser } = await supabaseAdmin
+      .from("users")
+      .select("role, student_account_type")
+      .eq("id", id)
+      .maybeSingle();
+
     const updatePayload: Record<string, unknown> = {};
     if (fullName !== undefined) updatePayload.full_name = fullName;
     if (role !== undefined) updatePayload.role = role;
@@ -1316,17 +1533,15 @@ export const updateUserAdmin = createServerFn({ method: "POST" })
     if (phone !== undefined) updatePayload.phone = phone;
     if (birthDate !== undefined) updatePayload.birth_year = birthDate;
     else if (birthYear !== undefined) updatePayload.birth_year = birthYear;
+    if (studentAccountType !== undefined) updatePayload.student_account_type = studentAccountType;
+    else if ((role ?? currentUser?.role) === "student" && currentUser?.student_account_type != null && !("student_account_type" in updatePayload)) {
+      updatePayload.student_account_type = currentUser.student_account_type;
+    }
 
     if (Object.keys(updatePayload).length === 0) return { ok: true };
 
     // Verify caller is admin via service client and then use service client to update public.users
-    const { data: meRow, error: meErr } = await supabaseAdmin
-      .from("users")
-      .select("role")
-      .eq("id", context.userId)
-      .maybeSingle();
-    if (meErr) throw new Error(meErr.message);
-    if (!meRow || meRow.role !== 'admin') throw new Error('Forbidden');
+    await assertAdminContext(context);
 
     // Try update; if column is DATE and birth_year is integer, retry using a YYYY-01-01 string
     let row: any = null;
@@ -1510,13 +1725,13 @@ export const submitEvaluation = createServerFn({ method: "POST" })
 export const getStudentSkills = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { supabase } = context;
-    const { data: me, error: meErr } = await supabase
+    const { data: me, error: meErr } = await supabaseAdmin
       .from("users")
       .select("specific_id")
-      .single();
+      .eq("id", context.userId)
+      .maybeSingle();
     if (meErr || !me) throw new Error(meErr?.message ?? "User profile not found");
-    const { data, error } = await supabase.rpc("get_student_skills", {
+    const { data, error } = await context.supabase.rpc("get_student_skills", {
       p_student_id: me.specific_id,
     });
     if (error) throw new Error(error.message);

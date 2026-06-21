@@ -8,8 +8,8 @@ import {
   getStudentDashboard,
   getStudentSkillsById,
   getTeacherDashboard,
-  listAssignments,
-  listSubmissions,
+  listMyAssignments,
+  listMySubmissions,
   studentCancelBooking,
   submitAssignment,
   submitEvaluation,
@@ -41,8 +41,8 @@ export function useHSKStudentBookingViewModel() {
   const dashFn = useServerFn(getStudentDashboard);
   const meFn = useServerFn(getMe);
   const ratingsFn = useServerFn(getMyRatings);
-  const assignmentsFn = useServerFn(listAssignments);
-  const submissionsFn = useServerFn(listSubmissions);
+  const assignmentsFn = useServerFn(listMyAssignments);
+  const submissionsFn = useServerFn(listMySubmissions);
   const expireFn = useServerFn(expireStaleFreezes);
   const cancelFn = useServerFn(studentCancelBooking);
   const freezeFn = useServerFn(freezeCourse);
@@ -114,12 +114,14 @@ export function useHSKStudentBookingViewModel() {
 
   const progress = (dashQuery.data?.progress ?? []) as any[];
   const bookings = (dashQuery.data?.bookings ?? []) as any[];
+  const enrollments = (dashQuery.data?.enrollments ?? []) as any[];
 
   return {
     me: meQuery.data,
     meLoading: meQuery.isLoading,
     progress,
     bookings,
+    enrollments,
     ratedSlots,
     assignments: assignmentsQuery.data ?? [],
     submissions: submissionsQuery.data ?? [],
