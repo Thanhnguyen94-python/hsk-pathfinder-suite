@@ -53,6 +53,7 @@ export function AdminMappingPanel({
   onRemoveStudentFromClass,
   getStudentSuggestions,
   onUpdateClass,
+  getClassEvents,
   teachers,
 }: {
   studentId: string;
@@ -70,6 +71,7 @@ export function AdminMappingPanel({
   onRemoveStudentFromClass?: (classId: string, studentId: string) => Promise<any>;
   getStudentSuggestions?: (q: string) => Promise<any[]>;
   onUpdateClass?: (classId: string, updates: Record<string, any>) => Promise<any>;
+  getClassEvents?: (classId: string) => Promise<any[]>;
   teachers?: any[];
 }) {
   const [classDetails, setClassDetails] = useState<any | null>(null);
@@ -187,6 +189,10 @@ export function AdminMappingPanel({
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [addStudentCode, setAddStudentCode] = useState('');
   const [autoCloseAfterAdd, setAutoCloseAfterAdd] = useState(false);
+  const [addStudentNote, setAddStudentNote] = useState('');
+  const [teacherChangeNote, setTeacherChangeNote] = useState('');
+  const [removingStudent, setRemovingStudent] = useState<{ id: string; name: string } | null>(null);
+  const [removeStudentNote, setRemoveStudentNote] = useState('');
 
   // suggestions
   const [classSuggestionsVisible, setClassSuggestionsVisible] = useState(false);
@@ -194,6 +200,46 @@ export function AdminMappingPanel({
   const [studentSuggestions, setStudentSuggestions] = useState<any[] | null>(null);
   const [studentSuggestionsLoading, setStudentSuggestionsLoading] = useState(false);
   const studentDebounceRef = useRef<number | null>(null);
+  const [localClassEvents, setLocalClassEvents] = useState<any[]>([]);
+  const [remoteClassEvents, setRemoteClassEvents] = useState<any[] | null>(null);
+  const [loadingClassEvents, setLoadingClassEvents] = useState(false);
+  const [classEventsError, setClassEventsError] = useState<string | null>(null);
+
+  const pushLocalClassEvent = (eventType: string, details: Record<string, any>) => {
+    const cid = selectedClass?.class_id ?? selectedClass?.classId ?? classId;
+    if (!cid) return;
+    setLocalClassEvents((prev) => ([
+      {
+        event_id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        class_id: cid,
+        event_type: eventType,
+        details,
+        source: 'ui-session',
+        created_at: new Date().toISOString(),
+      },
+      ...prev,
+    ]));
+  };
+
+  const refreshClassEvents = async (cid?: string) => {
+    if (!getClassEvents) return;
+    const classIdToFetch = cid ?? (selectedClass?.class_id ?? selectedClass?.classId ?? classId);
+    if (!classIdToFetch) {
+      setRemoteClassEvents(null);
+      return;
+    }
+    setLoadingClassEvents(true);
+    setClassEventsError(null);
+    try {
+      const events = await getClassEvents(classIdToFetch);
+      setRemoteClassEvents(events ?? []);
+    } catch (e: any) {
+      setClassEventsError((e && e.message) ? e.message : 'Không thể tải sự kiện lớp học.');
+      setRemoteClassEvents([]);
+    } finally {
+      setLoadingClassEvents(false);
+    }
+  };
 
   // immediate fetch helper for student suggestions (used on focus)
   const fetchStudentSuggestionsNow = async (q?: string) => {
@@ -276,6 +322,9 @@ export function AdminMappingPanel({
       .then((r: any) => setSelectedEnrollments(r ?? []))
       .catch(() => setSelectedEnrollments([]))
       .finally(() => setLoadingEnrollments(false));
+    if (getClassEvents) {
+      refreshClassEvents(c.class_id ?? c.classId);
+    }
     // close class suggestions when opening
     setClassSuggestionsVisible(false);
   };
@@ -288,6 +337,10 @@ export function AdminMappingPanel({
     setActionPending(true); setActionError(null);
     try {
       await onAddStudentToClass(cid, code);
+      pushLocalClassEvent('student_added', {
+        student_code: code,
+        note: addStudentNote.trim() || 'Thêm học viên vào lớp',
+      });
       // refresh lists
       if (getClasses) { setLoadingClassesList(true); await getClasses().then((r: any)=>setClassesList(r ?? [])).finally(()=>setLoadingClassesList(false)); }
       // Refresh enrollments for the currently selected class without toggling collapse
@@ -300,18 +353,24 @@ export function AdminMappingPanel({
       }
       // Clear input for convenience
       setAddStudentCode('');
+      setAddStudentNote('');
       // Close dialog if user enabled auto-close
       if (autoCloseAfterAdd) setAddDialogOpen(false);
+      if (getClassEvents) await refreshClassEvents(cid);
     } catch (e: any) {
       setActionError((e && e.message) ? e.message : 'Không thể thêm học viên.');
     } finally { setActionPending(false); }
   };
 
-  const handleRemoveStudent = async (sid: string) => {
+  const handleRemoveStudent = async (sid: string, note?: string) => {
     if (!onRemoveStudentFromClass || !selectedClass) return;
     setActionPending(true); setActionError(null);
     try {
       await onRemoveStudentFromClass(selectedClass.class_id ?? selectedClass.classId, sid);
+      pushLocalClassEvent('student_removed', {
+        student_code: sid,
+        note: note?.trim() || 'Xoá học viên khỏi lớp',
+      });
       // Refresh enrollments for the current class without toggling collapse
       if (getClassEnrollments) {
         setLoadingEnrollments(true);
@@ -322,6 +381,9 @@ export function AdminMappingPanel({
       }
       // Refresh classes list counts
       if (getClasses) { setLoadingClassesList(true); await getClasses().then((r: any)=>setClassesList(r ?? [])).finally(()=>setLoadingClassesList(false)); }
+      if (getClassEvents) await refreshClassEvents(selectedClass.class_id ?? selectedClass.classId);
+      setRemovingStudent(null);
+      setRemoveStudentNote('');
     } catch (e: any) {
       setActionError((e && e.message) ? e.message : 'Không thể xoá học viên.');
     } finally { setActionPending(false); }
@@ -334,7 +396,33 @@ export function AdminMappingPanel({
     if (!cid) return setActionError('Cần mã lớp.');
     setActionPending(true); setActionError(null);
     try {
+      const oldTid = selectedClass.teacher_id ?? selectedClass.teacherId ?? null;
+      // Resolve staff_code + name from teachers prop
+      const resolveTeacher = (idOrCode: string | null) => {
+        if (!idOrCode || !teachers || !Array.isArray(teachers)) return null;
+        return (teachers as any[]).find((x: any) =>
+          String(x.id ?? '') === String(idOrCode) ||
+          String(x.specific_id ?? x.specificId ?? '') === String(idOrCode) ||
+          String(x.staff_code ?? x.staffCode ?? '') === String(idOrCode)
+        ) ?? null;
+      };
+      const fmtTeacher = (t: any, fallback: string | null) => {
+        if (!t) return fallback;
+        const sc = t.staff_code ?? t.staffCode ?? fallback ?? '';
+        const name = t.full_name ?? t.fullName ?? '';
+        return name ? `${sc} — ${name}` : sc;
+      };
+      const oldT = resolveTeacher(oldTid);
+      const oldTeacherLabel = fmtTeacher(oldT, selectedClass.teacher_staff_code ?? selectedClass.teacher_code ?? oldTid);
+      const newT = resolveTeacher(teacherEdit);
+      const newTeacherLabel = fmtTeacher(newT, teacherEdit);
+
       await onUpdateClass(cid, { teacher_id: teacherEdit });
+      pushLocalClassEvent('teacher_changed', {
+        old_teacher: oldTeacherLabel,
+        new_teacher: newTeacherLabel,
+        note: teacherChangeNote.trim() || 'Đổi giáo viên',
+      });
       // refresh class list and enrollments without toggling collapse
       // refresh classes list
       if (getClasses) { setLoadingClassesList(true); const all = await getClasses().then((r:any)=>r ?? []).catch(()=>[]).finally(()=>setLoadingClassesList(false)); setClassesList(all);
@@ -360,10 +448,22 @@ export function AdminMappingPanel({
           .catch(()=>setSelectedEnrollments([]))
           .finally(()=>setLoadingEnrollments(false));
       }
+      if (getClassEvents) await refreshClassEvents(cid);
+      setTeacherChangeNote('');
     } catch (e: any) {
       setActionError((e && e.message) ? e.message : 'Không thể cập nhật giáo viên.');
     } finally { setActionPending(false); }
   };
+
+  useEffect(() => {
+    if (!selectedClass) {
+      setRemoteClassEvents(null);
+      setClassEventsError(null);
+      return;
+    }
+    if (!getClassEvents) return;
+    refreshClassEvents(selectedClass.class_id ?? selectedClass.classId);
+  }, [selectedClass, getClassEvents]);
 
   // student suggestions: debounce and call getStudentSuggestions if provided
   useEffect(() => {
@@ -565,6 +665,14 @@ export function AdminMappingPanel({
                   </div>
                   <Button size="sm" onClick={handleUpdateTeacher} disabled={actionPending || !teacherEdit}>Cập nhật</Button>
                 </div>
+                <div className="text-sm text-muted-foreground pt-1">Lý do thay đổi</div>
+                <div className="sm:col-span-2">
+                  <Input
+                    value={teacherChangeNote}
+                    onChange={(e) => setTeacherChangeNote(e.target.value)}
+                    placeholder="VD: dạy bù, đổi giáo viên chủ nhiệm, giáo viên nghỉ phép..."
+                  />
+                </div>
               </div>
               {loadingEnrollments ? (
                 <div className="text-sm text-muted-foreground">Đang tải học viên...</div>
@@ -579,13 +687,85 @@ export function AdminMappingPanel({
                         <div className="font-mono text-xs text-muted-foreground">{s.staff_code ?? s.student_id ?? s.specific_id ?? s.id}</div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <Button size="sm" variant="ghost" className="text-destructive" onClick={() => handleRemoveStudent(s.staff_code ?? s.student_id ?? s.specific_id ?? s.id)} disabled={actionPending}>Xoá</Button>
+                        <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setRemovingStudent({ id: s.staff_code ?? s.student_id ?? s.specific_id ?? s.id, name: s.full_name ?? s.student_name ?? '—' }); setRemoveStudentNote(''); }} disabled={actionPending}>Xoá</Button>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
               {actionError && <div className="mt-3 text-sm text-destructive">{actionError}</div>}
+
+              <div className="mt-4 rounded-lg border border-border bg-card p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="font-medium">Thông tin sự kiện lớp học</div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">UI preview</span>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => refreshClassEvents(selectedClass.class_id ?? selectedClass.classId)}
+                      disabled={!getClassEvents || loadingClassEvents}
+                    >
+                      Refresh
+                    </Button>
+                  </div>
+                </div>
+
+                {(() => {
+                  const currentClassId = selectedClass.class_id ?? selectedClass.classId;
+                  const merged = [
+                    ...((remoteClassEvents ?? []).filter((e: any) => String(e.class_id ?? currentClassId) === String(currentClassId))),
+                    ...((localClassEvents ?? []).filter((e: any) => String(e.class_id) === String(currentClassId))),
+                  ].sort((a: any, b: any) => {
+                    const ta = new Date(a.created_at ?? a.event_ts ?? 0).getTime();
+                    const tb = new Date(b.created_at ?? b.event_ts ?? 0).getTime();
+                    return tb - ta;
+                  });
+
+                  if (loadingClassEvents) {
+                    return <div className="text-sm text-muted-foreground">Đang tải sự kiện...</div>;
+                  }
+
+                  if (classEventsError) {
+                    return <div className="text-sm text-destructive">{classEventsError}</div>;
+                  }
+
+                  if (merged.length === 0) {
+                    return (
+                      <div className="text-sm text-muted-foreground">
+                        Chưa có sự kiện. Hiện panel sẽ hiển thị sự kiện theo phiên; khi nối CSDL sẽ hiện lịch sử đầy đủ.
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-2">
+                      {merged.slice(0, 30).map((ev: any, idx: number) => {
+                        const evType = String(ev.event_type ?? 'event').toLowerCase();
+                        const when = ev.created_at ?? ev.event_ts;
+                        const badgeClass = evType.includes('teacher')
+                          ? 'bg-indigo-100 text-indigo-700'
+                          : evType.includes('remove')
+                            ? 'bg-destructive/10 text-destructive'
+                            : evType.includes('add')
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-muted text-muted-foreground';
+                        const actor = ev.actor_name ?? ev.user_full_name ?? ev.actor_specific_id ?? ev.user_specific_id ?? ev.source ?? 'system';
+                        return (
+                          <div key={ev.event_id ?? `${evType}-${idx}`} className="rounded-md border border-border p-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${badgeClass}`}>{evType}</span>
+                              <span className="text-xs text-muted-foreground">{when ? new Date(when).toLocaleString() : '—'}</span>
+                              <span className="text-xs text-muted-foreground">{actor}</span>
+                            </div>
+                            <div className="mt-1 text-sm text-muted-foreground break-words">{JSON.stringify(ev.details ?? ev.new_value ?? {}, null, 0)}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
           ) : (
             <div className="text-sm text-muted-foreground">Chọn một lớp để xem học viên.</div>
@@ -593,11 +773,11 @@ export function AdminMappingPanel({
         </div>
       </div>
       {/* Add student dialog */}
-      <Dialog open={addDialogOpen} onOpenChange={(v) => setAddDialogOpen(v)}>
+      <Dialog open={addDialogOpen} onOpenChange={(v) => { setAddDialogOpen(v); if (!v) { setAddStudentCode(''); setAddStudentNote(''); } }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Thêm học viên vào lớp {selectedClass?.class_id ?? ''}</DialogTitle>
-            <DialogDescription>Nhập mã học viên để thêm vào lớp.</DialogDescription>
+            <DialogDescription>Nhập mã học viên và lý do ghi danh.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div>
@@ -616,11 +796,49 @@ export function AdminMappingPanel({
                 </div>
               )}
             </div>
+            <div className="space-y-1.5">
+              <Label>Lý do / Ghi chú (tùy chọn)</Label>
+              <Input
+                value={addStudentNote}
+                onChange={(e) => setAddStudentNote(e.target.value)}
+                placeholder="VD: nhập học mới, chuyển lớp, ghi danh bổ sung..."
+              />
+            </div>
             <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => { setAddDialogOpen(false); setAddStudentCode(''); }}>Huỷ</Button>
+              <Button variant="ghost" onClick={() => { setAddDialogOpen(false); setAddStudentCode(''); setAddStudentNote(''); }}>Huỷ</Button>
               <Button onClick={() => handleAddStudent(selectedClass?.class_id, addStudentCode)} disabled={actionPending || !addStudentCode}>Thêm</Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+      {/* Confirm remove student dialog */}
+      <Dialog open={!!removingStudent} onOpenChange={(v) => { if (!v) { setRemovingStudent(null); setRemoveStudentNote(''); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Xác nhận xoá học viên</DialogTitle>
+            <DialogDescription>
+              Xoá học viên {removingStudent?.name} ({removingStudent?.id}) khỏi lớp {selectedClass?.class_id ?? ''}?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5 py-2">
+            <Label>Lý do xoá (tùy chọn)</Label>
+            <Input
+              value={removeStudentNote}
+              onChange={(e) => setRemoveStudentNote(e.target.value)}
+              placeholder="VD: học viên xin nghỉ, chuyển lớp, không phù hợp lịch..."
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => { setRemovingStudent(null); setRemoveStudentNote(''); }}>Huỷ</Button>
+            <Button
+              variant="destructive"
+              onClick={() => { if (removingStudent) handleRemoveStudent(removingStudent.id, removeStudentNote); }}
+              disabled={actionPending}
+            >
+              Xác nhận xoá
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

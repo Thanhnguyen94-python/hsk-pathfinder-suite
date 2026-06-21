@@ -85,6 +85,7 @@ hsk_system/
 │       ├── 20260524083347_*.sql  # Stored procedures (claim_slot, cancel, freeze...)
 │       ├── 20260525110642_*.sql  # Thêm bảng: hsk_chapters, assignments, submissions
 │       └── 20260530193138_student_skills_and_slot_link.sql  # session_evaluations, student skills
+│       └── 20260621_class_events.sql   # class_events: bảng sự kiện lớp, RPC get_class_events
 │
 └── src/
     ├── styles.css                # Global CSS (Tailwind directives + CSS variables theme)
@@ -137,7 +138,7 @@ hsk_system/
     │       └── admin/            # Admin panel
     │           ├── HSK_AdminPanelView.tsx        # View controller
     │           └── HSK_AdminPanelUi.tsx          # UI thuần — exports multiple admin panels:
-    │                                       # - AdminMappingPanel: gán học viên vào lớp, tìm/kiểm tra xung đột, thêm/xóa học viên
+    │                                       # - AdminMappingPanel: gán học viên vào lớp, tìm/kiểm tra xung đột, thêm/xóa học viên; panel "Thông tin sự kiện lớp học"
     │                                       # - AdminClassesPanel: tạo/chỉnh sửa/lọc danh sách lớp, quản lý sĩ số và lịch
     │                                       # - AdminUserManagementPanel: danh sách tài khoản, chỉnh sửa, soft/hard delete
     │                                       # - AdminTeacherAnalyticsPanel: thống kê đánh giá, penalty, feedback
@@ -201,6 +202,7 @@ hsk_system/
 | `teacher_ratings` | Rating sao của học viên cho giáo viên | `rating_id` |
 | `teacher_penalties` | Phạt giáo viên khi huỷ muộn | `penalty_id` |
 | `audit_logs` | Log toàn bộ hành động quan trọng | `log_id` |
+| `class_events` | Lịch sử sự kiện lớp học (đổi GV, thêm/xoá HV) — ghi bởi server functions | `event_id` |
 
 ### Enums (PostgreSQL)
 
@@ -230,6 +232,7 @@ progress_status:'active' | 'frozen' | 'expired'
 | `get_student_skills(p_student_id)` | Điểm kỹ năng trung bình từ session_evaluations |
 | `get_top_teachers(p_limit)` | Top giáo viên theo rating |
 | `log_action(p_action, p_details)` | Ghi audit log |
+| `get_class_events(p_class_id, p_limit)` | Lấy lịch sử sự kiện lớp học theo class_id, kèm tên actor |
 
 ---
 
@@ -492,8 +495,7 @@ Trước khi viết code, xác định:
    - `["assignments"]` — danh sách bài tập
    - `["submissions"]` — danh sách bài nộp
    - `["audit"]` — audit logs
-   - `["teacher-analytics"]` — analytics giáo viên
-
+   - `["teacher-analytics"]` — analytics giáo viên   * `["admin-class-events", classId]` — lịch sử sự kiện lớp học (dùng với `getClassEventsAdmin`)
 5. **`DashboardShell` tự redirect về `/auth` nếu chưa đăng nhập.** Mọi route cần auth phải wrap bằng `<DashboardShell>`.
 
 ---
@@ -532,4 +534,4 @@ SUPABASE_PUBLISHABLE_KEY=eyJ...    # anon key (public)
 ---
 
 *README này được generate từ quét toàn bộ source code tại: `d:\10. PJ_HSK_SYSTEM\hsk_system`*
-*Cập nhật lần cuối: 2026-05-31*
+*Cập nhật lần cuối: 2026-06-21*

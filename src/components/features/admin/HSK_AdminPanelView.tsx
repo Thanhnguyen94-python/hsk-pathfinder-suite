@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { assignStudentToOfflineClass, createCareUser, getAuditLogs, getTeacherAnalytics, getAllUsersAdmin, updateUserAdmin, deleteUserAdmin, getAllClassesAdmin, createClassAdmin, updateClassAdmin, deleteClassAdmin, getClassDetailsAdmin, getClassEnrollmentsAdmin, getStudentEnrollmentsAdmin, getStudentSuggestionsAdmin, removeStudentFromClassAdmin } from "@/lib/hsk.functions";
+import { assignStudentToOfflineClass, createCareUser, getAuditLogs, getTeacherAnalytics, getAllUsersAdmin, updateUserAdmin, deleteUserAdmin, getAllClassesAdmin, createClassAdmin, updateClassAdmin, deleteClassAdmin, getClassDetailsAdmin, getClassEnrollmentsAdmin, getStudentEnrollmentsAdmin, getStudentSuggestionsAdmin, removeStudentFromClassAdmin, getClassEventsAdmin } from "@/lib/hsk.functions";
 import { AdminAuditLogsPanel, AdminMappingPanel, AdminTeacherAnalyticsPanel, AdminUserManagementPanel, AdminClassesPanel } from "./HSK_AdminPanelUi";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Eye, EyeOff } from "lucide-react";
@@ -23,6 +23,7 @@ export function HSK_AdminPanelView() {
   const getStudentEnrollmentsFn = useServerFn(getStudentEnrollmentsAdmin);
   const getStudentSuggestionsFn = useServerFn(getStudentSuggestionsAdmin);
   const removeStudentFn = useServerFn(removeStudentFromClassAdmin);
+  const getClassEventsFn = useServerFn(getClassEventsAdmin);
 
   const [studentId, setStudentId] = useState("");
   const [classId, setClassId] = useState("");
@@ -242,6 +243,7 @@ export function HSK_AdminPanelView() {
               return updateClassFn({ data: { classId: cid, updates: up } });
             }}
             teachers={(usersQuery.data ?? []).filter((u: any) => u.role === 'teacher')}
+            getClassEvents={(cid: string) => getClassEventsFn({ data: { classId: cid } })}
           />
         </TabsContent>
         <TabsContent value="teachers" className="mt-6">

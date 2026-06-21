@@ -206,6 +206,22 @@ export const assignStudentToOfflineClass = createServerFn({ method: "POST" })
       // ignore logging errors
     }
 
+    // write class_events (student_added)
+    try {
+      const { data: actor } = await supabaseAdmin.from("users").select("specific_id").eq("id", context.userId).maybeSingle();
+      await supabaseAdmin.from("class_events").insert({
+        class_id: data.classId,
+        event_type: "student_added",
+        actor_id: context.userId ?? null,
+        actor_specific_id: actor?.specific_id ?? null,
+        details: { student_id: data.studentId, note: "Admin gán học viên vào lớp" },
+        new_value: { student_id: data.studentId, class_id: data.classId },
+        source: "app",
+      });
+    } catch (evErr) {
+      // ignore class_events errors — table may not exist until migration runs
+    }
+
     return v_row;
   });
 
@@ -783,6 +799,21 @@ export const getAllClassesAdmin = createServerFn({ method: "GET" })
           // ignore
         }
       }
+      // write class_events (student_removed)
+      try {
+        const { data: actor } = await supabaseAdmin.from("users").select("specific_id").eq("id", context.userId).maybeSingle();
+        await supabaseAdmin.from("class_events").insert({
+          class_id: data.classId,
+          event_type: "student_removed",
+          actor_id: context.userId ?? null,
+          actor_specific_id: actor?.specific_id ?? null,
+          details: { student_id: data.studentId, note: "Admin xoá học viên khỏi lớp" },
+          previous_value: { student_id: data.studentId, class_id: data.classId },
+          source: "app",
+        });
+      } catch (evErr) {
+        // ignore class_events errors — table may not exist until migration runs
+      }
       return { ok: true };
     });
 
@@ -841,7 +872,7 @@ export const updateClassAdmin = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { data: me, error: meErr } = await supabaseAdmin.from("users").select("role").eq("id", context.userId).maybeSingle();
+    const { data: me, error: meErr } = await supabaseAdmin.from("users").select("role, specific_id").eq("id", context.userId).maybeSingle();
     if (meErr) throw new Error(meErr.message);
     if (!me || me.role !== "admin") throw new Error("Unauthorized");
 
@@ -862,6 +893,16 @@ export const updateClassAdmin = createServerFn({ method: "POST" })
     for (const k of Object.keys(data.updates ?? {})) {
       if (allowed.includes(k)) updates[k] = (data.updates as any)[k];
     }
+
+    // pre-fetch old teacher_id to capture previous value in class_events
+    let oldTeacherId: string | null = null;
+    if ("teacher_id" in updates) {
+      try {
+        const { data: old } = await supabaseAdmin.from("classes").select("teacher_id").eq("class_id", data.classId).maybeSingle();
+        oldTeacherId = old?.teacher_id ?? null;
+      } catch (e) { /* ignore */ }
+    }
+
     const { data: row, error } = await supabaseAdmin
       .from("classes")
       .update(updates)
@@ -869,6 +910,62 @@ export const updateClassAdmin = createServerFn({ method: "POST" })
       .select()
       .single();
     if (error) throw new Error(error.message);
+
+    // write class_events when teacher changed
+    if ("teacher_id" in updates && oldTeacherId !== updates.teacher_id) {
+      // Resolve staff_code + full_name for display labels
+      let oldTeacherLabel: string | null = oldTeacherId;
+      let newTeacherLabel: string | null = updates.teacher_id ?? null;
+      try {
+        if (oldTeacherId) {
+          const { data: oldT } = await supabaseAdmin
+            .from("users").select("staff_code, full_name").eq("id", oldTeacherId).maybeSingle();
+          if (oldT?.staff_code) {
+            oldTeacherLabel = oldT.full_name
+              ? `${oldT.staff_code} — ${oldT.full_name}`
+              : oldT.staff_code;
+          }
+        }
+        if (updates.teacher_id) {
+          // teacher_id passed from UI may be staff_code or UUID
+          let newT: any = null;
+          const { data: byCode } = await supabaseAdmin
+            .from("users").select("staff_code, full_name").eq("staff_code", updates.teacher_id).maybeSingle();
+          if (byCode) {
+            newT = byCode;
+          } else {
+            const { data: byId } = await supabaseAdmin
+              .from("users").select("staff_code, full_name").eq("id", updates.teacher_id).maybeSingle();
+            newT = byId ?? null;
+          }
+          if (newT?.staff_code) {
+            newTeacherLabel = newT.full_name
+              ? `${newT.staff_code} — ${newT.full_name}`
+              : newT.staff_code;
+          }
+        }
+      } catch (e) { /* ignore lookup errors */ }
+
+      try {
+        await supabaseAdmin.from("class_events").insert({
+          class_id: data.classId,
+          event_type: "teacher_changed",
+          actor_id: context.userId ?? null,
+          actor_specific_id: (me as any).specific_id ?? null,
+          details: {
+            old_teacher: oldTeacherLabel,
+            new_teacher: newTeacherLabel,
+            note: "Admin đổi giáo viên lớp học",
+          },
+          previous_value: { teacher_id: oldTeacherId },
+          new_value: { teacher_id: updates.teacher_id },
+          source: "app",
+        });
+      } catch (evErr) {
+        // ignore class_events errors — table may not exist until migration runs
+      }
+    }
+
     return row;
   });
 
@@ -883,6 +980,70 @@ export const deleteClassAdmin = createServerFn({ method: "POST" })
     const { data: row, error } = await supabaseAdmin.from("classes").delete().eq("class_id", data.classId).select().single();
     if (error) throw new Error(error.message);
     return row;
+  });
+
+// ---------- Class Events ----------
+
+export const getClassEventsAdmin = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z.object({
+      classId: z.string().min(1),
+      limit: z.number().int().min(1).max(500).optional(),
+    }).parse(d)
+  )
+  .handler(async ({ data, context }) => {
+    const { data: me, error: meErr } = await supabaseAdmin.from("users").select("role").eq("id", context.userId).maybeSingle();
+    if (meErr) throw new Error(meErr.message);
+    if (!me || me.role !== "admin") throw new Error("Unauthorized");
+    const { data: rows, error } = await supabaseAdmin.rpc("get_class_events", {
+      p_class_id: data.classId,
+      p_limit: data.limit ?? 100,
+    });
+    if (error) {
+      // gracefully return empty when table / function not yet migrated
+      const m = String(error.message ?? error);
+      if (m.includes("does not exist") || m.includes("42P01") || m.includes("Could not find")) {
+        return [];
+      }
+      throw new Error(error.message);
+    }
+    return rows ?? [];
+  });
+
+export const createClassEventAdmin = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z.object({
+      classId: z.string().min(1),
+      eventType: z.string().min(1).max(100),
+      details: z.record(z.any()).optional(),
+      previousValue: z.record(z.any()).optional(),
+      newValue: z.record(z.any()).optional(),
+    }).parse(d)
+  )
+  .handler(async ({ data, context }) => {
+    const { data: me, error: meErr } = await supabaseAdmin.from("users").select("role, specific_id").eq("id", context.userId).maybeSingle();
+    if (meErr) throw new Error(meErr.message);
+    if (!me || me.role !== "admin") throw new Error("Unauthorized");
+    const { error } = await supabaseAdmin.from("class_events").insert({
+      class_id: data.classId,
+      event_type: data.eventType,
+      actor_id: context.userId ?? null,
+      actor_specific_id: (me as any).specific_id ?? null,
+      details: data.details ?? {},
+      previous_value: data.previousValue ?? null,
+      new_value: data.newValue ?? null,
+      source: "app",
+    });
+    if (error) {
+      const m = String(error.message ?? error);
+      if (m.includes("does not exist") || m.includes("42P01")) {
+        return { ok: false, skipped: true };
+      }
+      throw new Error(error.message);
+    }
+    return { ok: true };
   });
 
 // ---------- Customer Care directory ----------
