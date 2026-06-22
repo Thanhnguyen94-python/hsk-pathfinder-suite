@@ -207,7 +207,7 @@ export function HSK_StudentDashboardView() {
               <section>
                 <div className="mb-3 flex items-center justify-between">
                   <h2 className="font-display text-lg font-semibold">Đặt lịch 1-1 với giáo viên</h2>
-                  {onlineCourses.length > 0 && <HSK_BookingDialog courses={onlineCourses} />}
+                  <HSK_BookingDialog courses={onlineCourses} />
                 </div>
                 {onlineCourses.length === 0 && (
                   <p className="text-sm text-muted-foreground">Bạn chưa đăng ký khoá Online nào.</p>
@@ -250,7 +250,7 @@ export function HSK_StudentDashboardView() {
             <section>
               <div className="mb-3 flex items-center justify-between">
                 <h2 className="font-display text-lg font-semibold">Đặt lịch 1-1 với giáo viên</h2>
-                {onlineCourses.length > 0 && <HSK_BookingDialog courses={onlineCourses} />}
+                <HSK_BookingDialog courses={onlineCourses} />
               </div>
               {onlineCourses.length === 0 && (
                 <p className="text-sm text-muted-foreground">Bạn chưa đăng ký khoá Online nào.</p>

@@ -235,7 +235,7 @@ export function BookingsTable({
   };
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<HSKSlot["status"] | "all">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "upcoming" | "ongoing" | "completed" | "cancelled">("all");
   const [dateRangeFilter, setDateRangeFilter] = useState<"all" | "week" | "month" | "custom">("all");
   const [customDateFrom, setCustomDateFrom] = useState("");
   const [customDateTo, setCustomDateTo] = useState("");
@@ -287,11 +287,37 @@ export function BookingsTable({
     const customFrom = customDateFrom ? new Date(customDateFrom) : null;
     const customTo = customDateTo ? endOfDay(new Date(customDateTo)) : null;
 
+    const getBookingDisplayStatus = (booking: HSKSlot) => {
+      const now = Date.now();
+      const start = new Date(booking.session_date).getTime();
+      const hasActualEnd = !!booking.actual_end_time;
+      const end = hasActualEnd
+        ? new Date(booking.actual_end_time as string).getTime()
+        : start + 90 * 60 * 1000;
+
+      const rawStatus = String(booking.status ?? "").toLowerCase();
+
+      if (rawStatus.includes("cancelled")) {
+        return "cancelled";
+      } else if (now >= start && now <= end) {
+        return "ongoing";
+      } else if (now > end) {
+        return "completed";
+      }
+      return "upcoming";
+    };
+
     return bookings.filter((b) => {
-      if (statusFilter !== "all" && b.status !== statusFilter) return false;
+      if (statusFilter !== "all" && getBookingDisplayStatus(b) !== statusFilter) return false;
 
       if (query) {
-        const haystack = `${b.course_name ?? b.class_id ?? ""} ${b.teacher_name ?? ""} ${b.status ?? ""} ${getStatusLabel(b.status, BOOKING_STATUS_LABELS)}`
+        const displayStatus = getBookingDisplayStatus(b);
+        const displayStatusLabel = 
+          displayStatus === "cancelled" ? "Đã huỷ" :
+          displayStatus === "ongoing" ? "Đang diễn ra" :
+          displayStatus === "completed" ? "Hoàn thành" : "Sắp diễn ra";
+
+        const haystack = `${b.course_name ?? b.class_id ?? ""} ${b.teacher_name ?? ""} ${b.status ?? ""} ${displayStatusLabel}`
           .toLowerCase();
         if (!haystack.includes(query)) return false;
       }
@@ -385,7 +411,7 @@ export function BookingsTable({
               <Select
                 value={statusFilter}
                 onValueChange={(value) => {
-                  setStatusFilter(value as HSKSlot["status"] | "all");
+                  setStatusFilter(value as any);
                   setPage(1);
                 }}
               >
@@ -394,10 +420,10 @@ export function BookingsTable({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Tất cả</SelectItem>
-                  <SelectItem value="pending">Chờ xác nhận</SelectItem>
-                  <SelectItem value="confirmed">Đã xác nhận</SelectItem>
-                  <SelectItem value="cancelled_valid">Huỷ hợp lệ</SelectItem>
-                  <SelectItem value="cancelled_late">Huỷ muộn</SelectItem>
+                  <SelectItem value="upcoming">Sắp diễn ra</SelectItem>
+                  <SelectItem value="ongoing">Đang diễn ra</SelectItem>
+                  <SelectItem value="completed">Hoàn thành</SelectItem>
+                  <SelectItem value="cancelled">Đã huỷ</SelectItem>
                 </SelectContent>
               </Select>
             </div>
