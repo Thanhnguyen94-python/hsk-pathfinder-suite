@@ -31,17 +31,21 @@ import {
   Tooltip,
 } from "recharts";
 import type { HSKSlot } from "@/types/hsk-models/hsk-booking.types";
+import { BOOKING_STATUS_LABELS, getStatusLabel } from "@/lib/hsk-status-labels";
 
 // ─── Status badge ────────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-    pending: { label: "Chờ nhận", variant: "secondary" },
-    confirmed: { label: "Đã xác nhận", variant: "default" },
-    cancelled: { label: "Đã huỷ", variant: "destructive" },
-    completed: { label: "Hoàn thành", variant: "outline" },
+  const map: Record<string, { variant: "default" | "secondary" | "destructive" | "outline" }> = {
+    pending: { variant: "secondary" },
+    confirmed: { variant: "default" },
+    cancelled: { variant: "destructive" },
+    cancelled_valid: { variant: "destructive" },
+    cancelled_late: { variant: "destructive" },
+    completed: { variant: "outline" },
   };
-  const cfg = map[status] ?? { label: status, variant: "outline" as const };
-  return <Badge variant={cfg.variant}>{cfg.label}</Badge>;
+  const normalized = String(status ?? "").toLowerCase();
+  const cfg = map[normalized] ?? { variant: "outline" as const };
+  return <Badge variant={cfg.variant}>{getStatusLabel(status, BOOKING_STATUS_LABELS)}</Badge>;
 }
 
 // ─── Spider-chart helper ──────────────────────────────────────────────────────

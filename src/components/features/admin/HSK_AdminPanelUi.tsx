@@ -37,6 +37,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { USER_STATUS_LABELS, getStatusLabel } from "@/lib/hsk-status-labels";
 
 const DAY_LABELS = new Map<number, string>([
   [0, "Chủ nhật"],
@@ -1500,7 +1501,7 @@ export function AdminUserManagementPanel({
                           if (k === 'status') return (
                             <TableCell key={k}>
                               <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${u.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-destructive/10 text-destructive'}`}>
-                                {u.status}
+                                {getStatusLabel(u.status, USER_STATUS_LABELS)}
                               </span>
                             </TableCell>
                           );
@@ -1612,8 +1613,8 @@ export function AdminUserManagementPanel({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="disabled">Disabled</SelectItem>
+                  <SelectItem value="active">{USER_STATUS_LABELS.active}</SelectItem>
+                  <SelectItem value="disabled">{USER_STATUS_LABELS.disabled}</SelectItem>
                 </SelectContent>
               </Select>
             </div>

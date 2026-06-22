@@ -19,6 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { USER_STATUS_LABELS, getStatusLabel } from "@/lib/hsk-status-labels";
 
 const STUDENT_SORT_FIELDS = [
   { value: "created_at", label: "Ngày tham gia" },
@@ -312,8 +313,8 @@ export function HSK_CareDashboardUi({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="disabled">Disabled</SelectItem>
+                    <SelectItem value="active">{USER_STATUS_LABELS.active}</SelectItem>
+                    <SelectItem value="disabled">{USER_STATUS_LABELS.disabled}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -442,7 +443,7 @@ export function HSK_CareDashboardUi({
                       variant={student.status === "active" ? "default" : "destructive"}
                       className="capitalize"
                     >
-                      {student.status}
+                      {getStatusLabel(student.status, USER_STATUS_LABELS)}
                     </Badge>
                   </TableCell>
                   <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
@@ -538,7 +539,7 @@ export function HSK_CareDashboardUi({
                       variant={member.status === "active" ? "default" : "destructive"}
                       className="capitalize"
                     >
-                      {member.status}
+                      {getStatusLabel(member.status, USER_STATUS_LABELS)}
                     </Badge>
                   </TableCell>
                   <TableCell className="whitespace-nowrap text-xs text-muted-foreground">

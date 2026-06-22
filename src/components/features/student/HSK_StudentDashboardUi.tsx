@@ -39,6 +39,11 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2 } from "lucide-react";
 import type { HSKSlot } from "@/types/hsk-models/hsk-booking.types";
+import {
+  BOOKING_STATUS_LABELS,
+  LEARNING_PROGRESS_STATUS_LABELS,
+  getStatusLabel,
+} from "@/lib/hsk-status-labels";
 
 // ─── Cancel Confirmation Dialog ───────────────────────────────────────────────
 function CancelConfirmDialog({
@@ -161,7 +166,7 @@ export function ProgressCards({
                       : "destructive"
                   }
                 >
-                  {p.status}
+                  {getStatusLabel(p.status, LEARNING_PROGRESS_STATUS_LABELS)}
                 </Badge>
               </div>
               <Progress value={pct} className="mt-3" />
@@ -286,7 +291,7 @@ export function BookingsTable({
       if (statusFilter !== "all" && b.status !== statusFilter) return false;
 
       if (query) {
-        const haystack = `${b.course_name ?? b.class_id ?? ""} ${b.teacher_name ?? ""} ${b.status ?? ""}`
+        const haystack = `${b.course_name ?? b.class_id ?? ""} ${b.teacher_name ?? ""} ${b.status ?? ""} ${getStatusLabel(b.status, BOOKING_STATUS_LABELS)}`
           .toLowerCase();
         if (!haystack.includes(query)) return false;
       }
@@ -321,8 +326,8 @@ export function BookingsTable({
         aValue = parseIsoDate(a.session_date)?.getTime() ?? 0;
         bValue = parseIsoDate(b.session_date)?.getTime() ?? 0;
       } else if (sortBy === "status") {
-        aValue = a.status ?? "";
-        bValue = b.status ?? "";
+        aValue = getStatusLabel(a.status, BOOKING_STATUS_LABELS);
+        bValue = getStatusLabel(b.status, BOOKING_STATUS_LABELS);
       } else {
         aValue = a.teacher_name ?? "";
         bValue = b.teacher_name ?? "";
@@ -389,10 +394,10 @@ export function BookingsTable({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Tất cả</SelectItem>
-                  <SelectItem value="pending">Pending</SelectItem>
-                  <SelectItem value="confirmed">Confirmed</SelectItem>
-                  <SelectItem value="cancelled_valid">Cancelled valid</SelectItem>
-                  <SelectItem value="cancelled_late">Cancelled late</SelectItem>
+                  <SelectItem value="pending">Chờ xác nhận</SelectItem>
+                  <SelectItem value="confirmed">Đã xác nhận</SelectItem>
+                  <SelectItem value="cancelled_valid">Huỷ hợp lệ</SelectItem>
+                  <SelectItem value="cancelled_late">Huỷ muộn</SelectItem>
                 </SelectContent>
               </Select>
             </div>

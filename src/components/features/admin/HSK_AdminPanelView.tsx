@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { HSK_Theme } from "@/theme/hsk-config-theme";
+import { USER_STATUS_LABELS } from "@/lib/hsk-status-labels";
 
 export function HSK_AdminPanelView() {
   const qc = useQueryClient();
@@ -388,8 +389,8 @@ export function HSK_AdminPanelView() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="disabled">Disabled</SelectItem>
+                    <SelectItem value="active">{USER_STATUS_LABELS.active}</SelectItem>
+                    <SelectItem value="disabled">{USER_STATUS_LABELS.disabled}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
