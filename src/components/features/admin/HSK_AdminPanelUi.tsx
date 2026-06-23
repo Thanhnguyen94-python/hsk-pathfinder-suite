@@ -1900,23 +1900,23 @@ export function AdminClassesPanel({
 
         <div className="grid gap-4 lg:grid-cols-2">
           <div className="space-y-1.5">
-            <Label>Mã lớp</Label>
+            <Label>Mã lớp(*)</Label>
             <Input placeholder="L-OFL-HSK1-NC-0001" value={form.classId} onChange={(e) => setForm((s:any)=>({...s,classId:e.target.value}))} />
           </div>
           <div className="space-y-1.5">
-            <Label>Tên lớp</Label>
+            <Label>Tên lớp(*)</Label>
             <Input value={form.className} onChange={(e) => setForm((s:any)=>({...s,className:e.target.value}))} />
           </div>
           <div className="space-y-1.5">
-            <Label>Tổng buổi</Label>
+            <Label>Tổng buổi(*)</Label>
             <Input type="number" value={String(form.totalLessons)} onChange={(e) => setForm((s:any)=>({...s,totalLessons: Number(e.target.value)}))} />
           </div>
           <div className="space-y-1.5">
-            <Label>Sĩ số tối đa</Label>
+            <Label>Sĩ số tối đa(*)</Label>
             <Input type="number" value={String(form.maxStudents)} onChange={(e) => setForm((s:any)=>({...s,maxStudents: Number(e.target.value)}))} />
           </div>
           <div className="space-y-1.5">
-            <Label>Ngày bắt đầu</Label>
+            <Label>Ngày bắt đầu(*)</Label>
             <Input type="date" value={form.startDate} onChange={(e) => setForm((s:any)=>({...s,startDate:e.target.value}))} />
           </div>
           <div className="space-y-1.5">
@@ -1924,16 +1924,16 @@ export function AdminClassesPanel({
             <Input type="date" value={form.endDate} onChange={(e) => setForm((s:any)=>({...s,endDate:e.target.value}))} />
           </div>
           <div className="space-y-1.5">
-            <Label>Giờ bắt đầu</Label>
+            <Label>Giờ bắt đầu(*)</Label>
             <Input type="time" value={form.startTime} onChange={(e) => setForm((s:any)=>({...s,startTime:e.target.value}))} />
           </div>
           <div className="space-y-1.5">
-            <Label>Giờ kết thúc</Label>
+            <Label>Giờ kết thúc(*)</Label>
             <Input type="time" value={form.endTime} onChange={(e) => setForm((s:any)=>({...s,endTime:e.target.value}))} />
           </div>
 
           <div className="space-y-1.5">
-            <Label>Thứ trong tuần</Label>
+            <Label>Thứ trong tuần(*)</Label>
             <div className="flex flex-wrap gap-2">
               {DAYS.map((d) => (
                 <label key={d.v} className="inline-flex items-center gap-2">
@@ -1949,7 +1949,7 @@ export function AdminClassesPanel({
           </div>
 
           <div className="space-y-1.5">
-            <Label>Giáo viên</Label>
+            <Label>Giáo viên(*)</Label>
             <Select value={form.teacherId} onValueChange={(v) => setForm((s:any)=>({...s,teacherId: v === '__none' ? '' : v }))}>
               <SelectTrigger>
                 <SelectValue />

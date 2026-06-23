@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   useHSKTeacherBookingViewModel,
   useTeacherStudentLookup,
@@ -8,6 +9,7 @@ import {
   PenaltiesTable,
   StudentLookupPanel,
 } from "./HSK_TeacherDashboardUi";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export function HSK_TeacherDashboardView() {
   const {
@@ -20,6 +22,7 @@ export function HSK_TeacherDashboardView() {
     claimState,
     cancelState,
     evaluationState,
+    error: dashboardError,
   } = useHSKTeacherBookingViewModel();
 
   const {
@@ -28,6 +31,8 @@ export function HSK_TeacherDashboardView() {
     isLoading: lookupLoading,
     error: lookupError,
   } = useTeacherStudentLookup();
+
+  const [activeTab, setActiveTab] = useState("pending-slots");
 
   return (
     <div className="space-y-8">
@@ -44,22 +49,40 @@ export function HSK_TeacherDashboardView() {
         evaluationSuccess={evaluationState.isSuccess}
       />
 
-      {/* Pending students waiting to be claimed */}
-      <PendingSlotsTable
-        pendingSlots={pendingSlots}
-        onClaim={claimSlot}
-        claimPending={claimState.isPending}
-      />
-
-      {/* My confirmed teaching bookings */}
-      <MyBookingsTable
-        myBookings={myBookings}
-        onCancel={cancelBooking}
-        cancelPending={cancelState.isPending}
-      />
-
-      {/* My penalties */}
-      <PenaltiesTable penalties={penalties} />
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        {dashboardError && (
+          <p className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            Không tải được dữ liệu lịch dạy: {(dashboardError as Error)?.message ?? "Lỗi không xác định"}
+          </p>
+        )}
+        <TabsList>
+          <TabsTrigger value="pending-slots">Học viên đang chờ nhận lớp</TabsTrigger>
+          <TabsTrigger value="my-bookings">Lịch dạy của tôi</TabsTrigger>
+          <TabsTrigger value="penalties">Vi phạm của tôi</TabsTrigger>
+        </TabsList>
+        <TabsContent value="pending-slots" className="mt-6">
+          <PendingSlotsTable
+            pendingSlots={pendingSlots}
+            onClaim={claimSlot}
+            claimPending={claimState.isPending}
+          />
+        </TabsContent>
+        <TabsContent value="my-bookings" className="mt-6">
+          <MyBookingsTable
+            myBookings={myBookings}
+            onCancel={cancelBooking}
+            cancelPending={cancelState.isPending}
+            onSubmitEvaluation={submitEvaluation}
+            evaluationPending={evaluationState.isPending}
+            evaluationError={evaluationState.error as Error | null}
+            evaluationSuccess={evaluationState.isSuccess}
+          />
+        </TabsContent>
+        <TabsContent value="penalties" className="mt-6">
+          <PenaltiesTable penalties={penalties} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
+

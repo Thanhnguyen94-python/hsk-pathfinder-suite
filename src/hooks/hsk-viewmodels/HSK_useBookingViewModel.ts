@@ -186,6 +186,7 @@ export function useHSKTeacherBookingViewModel() {
     myBookings: (dashQuery.data?.myBookings ?? []) as HSKSlot[],
     penalties: (dashQuery.data?.penalties ?? []) as any[],
     isLoading: dashQuery.isLoading,
+    error: dashQuery.error,
     claimSlot: claimMutation.mutate,
     cancelBooking: cancelMutation.mutate,
     submitEvaluation: evaluationMutation.mutate,

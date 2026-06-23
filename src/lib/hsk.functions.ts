@@ -486,36 +486,321 @@ export const getStudentDashboard = createServerFn({ method: "GET" })
 export const getTeacherDashboard = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { supabase } = context;
-    const [pending, mine, penalties, users] = await Promise.all([
-      supabase
+    const { data: me, error: meErr } = await supabaseAdmin
+      .from("users")
+      .select("id, specific_id, staff_code")
+      .eq("id", context.userId)
+      .maybeSingle();
+    if (meErr) throw new Error(meErr.message);
+    if (!me?.specific_id) throw new Error("User profile not found");
+
+    const isMissingTableError = (message: string) =>
+      message.includes("Could not find the table") ||
+      message.includes("does not exist") ||
+      message.includes("42P01");
+
+    const teacherKeys = Array.from(
+      new Set([me.specific_id, me.id, me.staff_code].filter(Boolean)),
+    ) as string[];
+    const normalizeKey = (value: unknown) => String(value ?? "").trim().toLowerCase();
+    const teacherKeySet = new Set(teacherKeys.map((k) => normalizeKey(k)).filter(Boolean));
+    const matchTeacherKey = (value: unknown) => teacherKeySet.has(normalizeKey(value));
+
+    const classesQuery =
+      teacherKeys.length <= 1
+        ? supabaseAdmin
+            .from("classes")
+            .select("*")
+            .eq("teacher_id", teacherKeys[0] ?? me.specific_id)
+            .order("start_date", { ascending: true })
+        : supabaseAdmin
+            .from("classes")
+            .select("*")
+            .or(teacherKeys.map((key) => `teacher_id.eq.${key}`).join(","))
+            .order("start_date", { ascending: true });
+
+    const [pending, mine, penalties, classesRes] = await Promise.all([
+      supabaseAdmin
         .from("bookings")
         .select("*")
         .eq("status", "pending")
         .is("teacher_id", null)
         .order("session_date", { ascending: true }),
-      supabase
+      supabaseAdmin
         .from("bookings")
         .select("*")
+        .in("teacher_id", teacherKeys)
         .order("session_date", { ascending: true }),
-      supabase
+      supabaseAdmin
         .from("teacher_penalties")
         .select("*")
+        .in("teacher_id", teacherKeys)
         .order("created_at", { ascending: false }),
-      supabase.from("users").select("specific_id, full_name"),
+      classesQuery,
     ]);
-    if (pending.error) throw new Error(pending.error.message);
-    if (mine.error) throw new Error(mine.error.message);
-    if (penalties.error) throw new Error(penalties.error.message);
-    const nameMap = new Map((users.data ?? []).map((u: any) => [u.specific_id, u.full_name]));
-    const enrich = (b: any) => ({
+
+    const pendingMissing = pending.error
+      ? isMissingTableError(String(pending.error.message ?? pending.error))
+      : false;
+    const mineMissing = mine.error
+      ? isMissingTableError(String(mine.error.message ?? mine.error))
+      : false;
+    const penaltiesMissing = penalties.error
+      ? isMissingTableError(String(penalties.error.message ?? penalties.error))
+      : false;
+
+    if (pending.error && !pendingMissing) throw new Error(pending.error.message);
+    if (mine.error && !mineMissing) throw new Error(mine.error.message);
+    if (penalties.error && !penaltiesMissing) throw new Error(penalties.error.message);
+    if (classesRes.error && !isMissingTableError(String(classesRes.error.message ?? classesRes.error))) {
+      throw new Error(classesRes.error.message);
+    }
+
+    const pendingRows = pendingMissing ? [] : (pending.data ?? []);
+    const mineRowsBase = mineMissing ? [] : (mine.data ?? []);
+    const penaltiesBase = penaltiesMissing ? [] : (penalties.data ?? []);
+
+    let classes = classesRes.data ?? [];
+    if (classes.length === 0) {
+      const classesFallback = await supabaseAdmin
+        .from("classes")
+        .select("*")
+        .not("teacher_id", "is", null)
+        .order("start_date", { ascending: true });
+      if (classesFallback.error && !isMissingTableError(String(classesFallback.error.message ?? classesFallback.error))) {
+        throw new Error(classesFallback.error.message);
+      }
+      classes = (classesFallback.data ?? []).filter((row: any) => matchTeacherKey(row.teacher_id));
+    }
+
+    let mineRowsRaw = mineRowsBase;
+    if (mineRowsRaw.length === 0) {
+      const mineFallback = await supabaseAdmin
+        .from("bookings")
+        .select("*")
+        .not("teacher_id", "is", null)
+        .order("session_date", { ascending: true });
+      if (mineFallback.error && !isMissingTableError(String(mineFallback.error.message ?? mineFallback.error))) {
+        throw new Error(mineFallback.error.message);
+      }
+      if (!mineFallback.error) {
+        mineRowsRaw = (mineFallback.data ?? []).filter((row: any) => matchTeacherKey(row.teacher_id));
+      }
+    }
+
+    let penaltyRows = penaltiesBase;
+    if (penaltyRows.length === 0) {
+      const penaltiesFallback = await supabaseAdmin
+        .from("teacher_penalties")
+        .select("*")
+        .not("teacher_id", "is", null)
+        .order("created_at", { ascending: false });
+      if (penaltiesFallback.error && !isMissingTableError(String(penaltiesFallback.error.message ?? penaltiesFallback.error))) {
+        throw new Error(penaltiesFallback.error.message);
+      }
+      if (!penaltiesFallback.error) {
+        penaltyRows = (penaltiesFallback.data ?? []).filter((row: any) => matchTeacherKey(row.teacher_id));
+      }
+    }
+
+    const classIds = Array.from(new Set(classes.map((c: any) => c.class_id).filter(Boolean)));
+
+    let classEnrollments: any[] = [];
+    if (classIds.length > 0) {
+      const enrollments = await supabaseAdmin
+        .from("class_enrollments")
+        .select("class_id, student_id, enrolled_at")
+        .in("class_id", classIds);
+      if (enrollments.error && !isMissingTableError(String(enrollments.error.message ?? enrollments.error))) {
+        throw new Error(enrollments.error.message);
+      }
+      classEnrollments = enrollments.data ?? [];
+    }
+
+    const studentIds = Array.from(
+      new Set([
+        ...pendingRows.map((b: any) => b.student_id).filter(Boolean),
+        ...mineRowsRaw.map((b: any) => b.student_id).filter(Boolean),
+        ...classEnrollments.map((e: any) => e.student_id).filter(Boolean),
+      ]),
+    ) as string[];
+
+    const users = studentIds.length
+      ? await supabaseAdmin.from("users").select("id, specific_id, staff_code, full_name")
+      : { data: [], error: null };
+    if (users.error) throw new Error(users.error.message);
+
+    const toKey = (v: unknown) => String(v ?? "").trim();
+    const studentIdSet = new Set(studentIds.map((v) => toKey(v)).filter(Boolean));
+    const nameMap = new Map<string, string | null>();
+    const codeMap = new Map<string, string | null>();
+    for (const u of users.data ?? []) {
+      const keys = [toKey(u.specific_id), toKey(u.id), toKey(u.staff_code)].filter(Boolean);
+      if (!keys.some((key) => studentIdSet.has(key))) continue;
+      const displayCode = (u.staff_code as string | null) ?? (u.specific_id as string | null) ?? null;
+      for (const key of keys) {
+        if (!nameMap.has(key)) nameMap.set(key, u.full_name ?? null);
+        if (!codeMap.has(key)) codeMap.set(key, displayCode);
+      }
+    }
+    const enrichBooking = (b: any) => ({
       ...b,
-      student_name: nameMap.get(b.student_id) ?? null,
+      student_name: nameMap.get(toKey(b.student_id)) ?? null,
+      student_code: codeMap.get(toKey(b.student_id)) ?? (b.student_id ?? null),
     });
+
+    const normalizeScheduleDays = (raw: any): Set<number> => {
+      const src = Array.isArray(raw)
+        ? raw.map((v: any) => Number(v)).filter((v: number) => !Number.isNaN(v))
+        : [];
+      const out = new Set<number>();
+      for (const n of src) {
+        if (n >= 0 && n <= 6) out.add(n);
+        if (n >= 1 && n <= 7) out.add(n % 7);
+        if (n >= 2 && n <= 8) out.add((n - 1) % 7);
+      }
+      return out;
+    };
+
+    const normalizeTimeValue = (value?: string | null) => {
+      const raw = String(value ?? "").trim();
+      if (!raw) return "00:00:00";
+      const m = raw.match(/^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/);
+      if (!m) return raw;
+      const hh = String(Math.max(0, Math.min(23, Number(m[1])))).padStart(2, "0");
+      const mm = String(Math.max(0, Math.min(59, Number(m[2])))).padStart(2, "0");
+      const ss = String(Math.max(0, Math.min(59, Number(m[3] ?? "0")))).padStart(2, "0");
+      return `${hh}:${mm}:${ss}`;
+    };
+
+    const parseDateOnly = (value?: string | null) => {
+      const raw = String(value ?? "").trim();
+      if (!raw) return new Date();
+
+      if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+        const d = new Date(`${raw}T00:00:00`);
+        if (!Number.isNaN(d.getTime())) return d;
+      }
+
+      let d = new Date(raw);
+      if (!Number.isNaN(d.getTime())) return d;
+
+      const dm = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if (dm) {
+        const day = dm[1].padStart(2, "0");
+        const month = dm[2].padStart(2, "0");
+        d = new Date(`${dm[3]}-${month}-${day}T00:00:00`);
+        if (!Number.isNaN(d.getTime())) return d;
+      }
+
+      return new Date();
+    };
+
+    const makeIsoLike = (date: Date, hhmmss?: string | null) => {
+      const yyyy = date.getFullYear();
+      const mm = String(date.getMonth() + 1).padStart(2, "0");
+      const dd = String(date.getDate()).padStart(2, "0");
+      return `${yyyy}-${mm}-${dd}T${normalizeTimeValue(hhmmss)}`;
+    };
+
+    const getBookingKey = (classId?: string | null, studentId?: string | null, sessionDate?: string | null) => {
+      const ts = sessionDate ? new Date(sessionDate).getTime() : NaN;
+      return `${classId ?? ""}|${studentId ?? ""}|${Number.isFinite(ts) ? ts : sessionDate ?? ""}`;
+    };
+
+    const mineRows = mineRowsRaw.map(enrichBooking);
+    const existingKeys = new Set(
+      mineRows.map((row: any) => getBookingKey(row.class_id, row.student_id, row.session_date)),
+    );
+
+    const studentsByClassFromBookings = new Map<string, Array<{ student_id: string; enrolled_at?: string | null }>>();
+    for (const row of mineRowsRaw) {
+      const classId = String(row?.class_id ?? "");
+      const studentId = String(row?.student_id ?? "");
+      if (!classId || !studentId) continue;
+      const current = studentsByClassFromBookings.get(classId) ?? [];
+      if (!current.some((x) => String(x.student_id) === studentId)) {
+        current.push({ student_id: studentId, enrolled_at: row?.created_at ?? null });
+      }
+      studentsByClassFromBookings.set(classId, current);
+    }
+
+    const enrollmentsByClass = new Map<string, any[]>();
+    for (const row of classEnrollments) {
+      const classId = String(row.class_id ?? "");
+      if (!classId) continue;
+      const current = enrollmentsByClass.get(classId) ?? [];
+      current.push(row);
+      enrollmentsByClass.set(classId, current);
+    }
+
+    const generatedRows: any[] = [];
+    for (const cls of classes) {
+      const classId = String(cls.class_id ?? "");
+      if (!classId) continue;
+
+      const studentsFromEnrollments = enrollmentsByClass.get(classId) ?? [];
+      const studentsFromBookings = studentsByClassFromBookings.get(classId) ?? [];
+      const students =
+        studentsFromEnrollments.length > 0
+          ? studentsFromEnrollments
+          : studentsFromBookings.length > 0
+            ? studentsFromBookings
+            : [{ student_id: null, enrolled_at: null }];
+
+      const totalLessons = Math.max(1, Number(cls.total_lessons ?? 15));
+      const baseDate = cls.start_date
+        ? parseDateOnly(String(cls.start_date))
+        : new Date();
+      const scheduleSet = normalizeScheduleDays(cls.schedule_days);
+      const useAnyDay = scheduleSet.size === 0;
+
+      const lessonDates: Date[] = [];
+      const cursor = new Date(baseDate);
+      cursor.setHours(0, 0, 0, 0);
+      let guard = 0;
+      while (lessonDates.length < totalLessons && guard < 1200) {
+        guard += 1;
+        const weekday = cursor.getDay();
+        if (useAnyDay || scheduleSet.has(weekday)) {
+          lessonDates.push(new Date(cursor));
+        }
+        cursor.setDate(cursor.getDate() + 1);
+      }
+
+      for (const student of students) {
+        const studentId = student?.student_id ? String(student.student_id) : null;
+        for (let index = 0; index < lessonDates.length; index += 1) {
+          const date = lessonDates[index];
+          const sessionDate = makeIsoLike(date, cls.start_time ?? "00:00:00");
+          const key = getBookingKey(classId, studentId, sessionDate);
+          if (existingKeys.has(key)) continue;
+
+          generatedRows.push({
+            slot_id: `${classId}-${studentId ?? "NO-STUDENT"}-L${String(index + 1).padStart(2, "0")}`,
+            class_id: classId,
+            course_name: cls.class_name ?? classId,
+            student_id: studentId,
+            teacher_id: me.specific_id,
+            session_date: sessionDate,
+            session_end_date: cls.end_time ? makeIsoLike(date, cls.end_time) : null,
+            status: cls.status === "completed" ? "completed" : "confirmed",
+            student_name: studentId ? nameMap.get(toKey(studentId)) ?? null : "Chưa gán học viên",
+            student_code: studentId ? codeMap.get(toKey(studentId)) ?? studentId : null,
+            is_enrollment_only: true,
+          });
+        }
+      }
+    }
+
+    const myBookings = [...mineRows, ...generatedRows].sort((a: any, b: any) =>
+      String(a.session_date ?? "").localeCompare(String(b.session_date ?? "")),
+    );
+
     return {
-      pendingSlots: (pending.data ?? []).map(enrich),
-      myBookings: (mine.data ?? []).map(enrich),
-      penalties: penalties.data ?? [],
+      pendingSlots: pendingRows.map(enrichBooking),
+      myBookings,
+      penalties: penaltyRows,
     };
   });
 

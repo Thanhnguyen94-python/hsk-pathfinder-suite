@@ -903,7 +903,7 @@ export function AssignmentsTable({
 
   return (
     <section>
-      <h2 className="mb-3 font-display text-lg font-semibold">Bài tập HSK</h2>
+      <h2 className="mb-3 font-display text-lg font-semibold">Làm bài tập về nhà.</h2>
 
       <div className="mb-4 max-w-md">
         <Input
