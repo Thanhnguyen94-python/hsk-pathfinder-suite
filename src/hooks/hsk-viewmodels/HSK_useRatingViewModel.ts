@@ -24,6 +24,8 @@ export function useHSKRatingViewModel() {
   const rateMutation = useMutation({
     mutationFn: (payload: {
       slotId: string;
+      classId: string;
+      sessionDate: string;
       teacherId: string;
       stars: number;
       comment?: string;

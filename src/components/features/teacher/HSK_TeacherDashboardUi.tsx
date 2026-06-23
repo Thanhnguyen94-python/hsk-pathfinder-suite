@@ -20,6 +20,7 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Loader2,
   Search,
@@ -76,7 +77,6 @@ import {
   PolarAngleAxis,
   PolarRadiusAxis,
   ResponsiveContainer,
-  Tooltip,
 } from "recharts";
 import type { HSKSlot } from "@/types/hsk-models/hsk-booking.types";
 import { BOOKING_STATUS_LABELS, getStatusLabel } from "@/lib/hsk-status-labels";
@@ -110,16 +110,21 @@ const SKILL_KEYS = Object.keys(SKILL_LABELS) as Array<keyof typeof SKILL_LABELS>
 function SkillRadarChart({ skills }: { skills: Array<{ skill: string; avg_score: number }> }) {
   const data = SKILL_KEYS.map((key) => {
     const found = skills.find((s) => s.skill === key);
-    return { subject: SKILL_LABELS[key], value: found ? Math.round(found.avg_score) : 0 };
+    return { skill: SKILL_LABELS[key], score: found ? Math.round(found.avg_score) : 0 };
   });
   return (
-    <ResponsiveContainer width="100%" height={260}>
-      <RadarChart cx="50%" cy="50%" outerRadius="75%" data={data}>
-        <PolarGrid stroke="hsl(var(--border))" />
-        <PolarAngleAxis dataKey="subject" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }} />
-        <PolarRadiusAxis angle={90} domain={[0, 100]} tick={{ fontSize: 10 }} />
-        <Radar name="Kỹ năng" dataKey="value" stroke="hsl(var(--primary))" fill="hsl(var(--primary))" fillOpacity={0.25} />
-        <Tooltip formatter={(v: number) => [`${v}/100`, "Điểm TB"]} />
+    <ResponsiveContainer width="100%" height={300}>
+      <RadarChart cx="50%" cy="50%" outerRadius="80%" data={data}>
+        <PolarGrid />
+        <PolarAngleAxis dataKey="skill" tick={{ fill: "hsl(var(--foreground))", fontSize: 12 }} />
+        <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: "hsl(var(--muted-foreground))" }} />
+        <Radar
+          name="Kỹ năng"
+          dataKey="score"
+          stroke="hsl(var(--primary))"
+          fill="hsl(var(--primary))"
+          fillOpacity={0.3}
+        />
       </RadarChart>
     </ResponsiveContainer>
   );
@@ -134,11 +139,50 @@ type EvalPayload = {
   generalComment?: string;
 };
 
+type AttendanceStatus = "present" | "absent_excused" | "absent_unexcused";
+
+type AttendanceStudentRow = {
+  student_id: string;
+  full_name: string | null;
+  staff_code: string | null;
+  attendance_status: AttendanceStatus | null;
+  excuse_reason: string | null;
+};
+
+type GradingStudentRow = {
+  student_id: string;
+  full_name: string | null;
+  staff_code: string | null;
+  listening: number | null;
+  speaking: number | null;
+  reading: number | null;
+  writing: number | null;
+  vocabulary: number | null;
+  grammar: number | null;
+  general_comment: string | null;
+};
+
 interface StudentLookupPanelProps {
+  teacherProfile?: {
+    full_name?: string | null;
+    staff_code?: string | null;
+    avg_stars?: number;
+    total_reviews?: number;
+  } | null;
   /** Slots xác nhận thuộc giáo viên này để validate */
   myConfirmedSlots: HSKSlot[];
   onLookup: (studentId: string) => void;
-  lookupResult?: { student: { specific_id: string; full_name: string }; skills: any[] } | null;
+  lookupResult?: {
+    student: { specific_id: string; staff_code?: string | null; full_name: string };
+    skills: any[];
+    courses?: Array<{
+      course_id?: string | null;
+      class_id?: string | null;
+      class_name?: string | null;
+      learning_mode?: string | null;
+      status?: string | null;
+    }>;
+  } | null;
   lookupLoading: boolean;
   lookupError?: Error | null;
   onSubmitEvaluation: (payload: EvalPayload) => void;
@@ -148,6 +192,7 @@ interface StudentLookupPanelProps {
 }
 
 export function StudentLookupPanel({
+  teacherProfile,
   myConfirmedSlots,
   onLookup,
   lookupResult,
@@ -197,6 +242,20 @@ export function StudentLookupPanel({
 
   return (
     <section className="rounded-xl border border-border bg-card p-5">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2">
+        <div>
+          <p className="text-sm font-semibold">
+            Xin chào, {teacherProfile?.full_name ?? "Giáo viên"}
+          </p>
+          <p className="text-xs text-muted-foreground font-mono">
+            {teacherProfile?.staff_code ?? "—"}
+          </p>
+        </div>
+        <Badge variant="outline" className="text-xs">
+          ⭐ {(teacherProfile?.avg_stars ?? 0).toFixed(1)} ({teacherProfile?.total_reviews ?? 0} đánh giá)
+        </Badge>
+      </div>
+
       <h2 className="mb-4 font-display text-base font-semibold flex items-center gap-2">
         <UserSearch className="h-4 w-4 text-primary" />
         Tra cứu kỹ năng học viên
@@ -206,7 +265,7 @@ export function StudentLookupPanel({
       <div className="flex gap-2 mb-4">
         <Input
           id="teacher-student-search"
-          placeholder="Nhập ID học viên (vd: ST-0001)"
+          placeholder="Nhập mã học viên/staff_code (vd: ST-0001)"
           value={query}
           onChange={(e) => { setQuery(e.target.value); }}
           onKeyDown={(e) => e.key === "Enter" && handleSearch()}
@@ -228,7 +287,9 @@ export function StudentLookupPanel({
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div>
               <p className="font-semibold">{lookupData.student.full_name}</p>
-              <p className="text-xs text-muted-foreground font-mono">{lookupData.student.specific_id}</p>
+              <p className="text-xs text-muted-foreground font-mono">
+                {lookupData.student.staff_code ?? lookupData.student.specific_id}
+              </p>
             </div>
             {eligibleSlots.length > 0 && (
               <Button size="sm" variant="default" onClick={openEvalModal} id="btn-open-eval">
@@ -249,6 +310,29 @@ export function StudentLookupPanel({
               Chưa có đánh giá kỹ năng nào.
             </p>
           )}
+
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Khoá học đã tham gia</p>
+            {(lookupData.courses ?? []).length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {(lookupData.courses ?? []).map((course, idx) => {
+                  const label =
+                    course.class_name ??
+                    course.course_id ??
+                    course.class_id ??
+                    `Khoá học ${idx + 1}`;
+                  const meta = [course.course_id, course.class_id].filter(Boolean).join(" · ");
+                  return (
+                    <Badge key={`${course.course_id ?? ""}-${course.class_id ?? ""}-${idx}`} variant="outline" className="max-w-full">
+                      <span className="truncate">{label}{meta ? ` (${meta})` : ""}</span>
+                    </Badge>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Chưa có dữ liệu khoá học.</p>
+            )}
+          </div>
         </div>
       )}
 
@@ -501,36 +585,64 @@ export function MyBookingsTable({
   myBookings,
   onCancel,
   cancelPending,
-  onSubmitEvaluation,
-  evaluationPending,
-  evaluationError,
-  evaluationSuccess,
+  onLoadAttendance,
+  onSaveAttendance,
+  attendanceSaving,
+  attendanceSaveError,
+  attendanceSaveSuccess,
+  onLoadGrading,
+  onSaveGrading,
+  gradingSaving,
+  gradingSaveError,
+  gradingSaveSuccess,
 }: {
   myBookings: HSKSlot[];
   onCancel: (slotId: string) => void;
   cancelPending?: boolean;
-  onSubmitEvaluation?: (payload: EvalPayload) => void;
-  evaluationPending?: boolean;
-  evaluationError?: Error | null;
-  evaluationSuccess?: boolean;
+  onLoadAttendance?: (payload: { classId: string; sessionDate: string }) => Promise<AttendanceStudentRow[]>;
+  onSaveAttendance?: (payload: {
+    classId: string;
+    sessionDate: string;
+    records: Array<{
+      studentId: string;
+      attendanceStatus: AttendanceStatus;
+      excuseReason?: string;
+    }>;
+  }) => Promise<any>;
+  attendanceSaving?: boolean;
+  attendanceSaveError?: Error | null;
+  attendanceSaveSuccess?: boolean;
+  onLoadGrading?: (payload: { classId: string; sessionDate: string }) => Promise<GradingStudentRow[]>;
+  onSaveGrading?: (payload: {
+    classId: string;
+    sessionDate: string;
+    records: Array<{
+      studentId: string;
+      listening: number;
+      speaking: number;
+      reading: number;
+      writing: number;
+      vocabulary: number;
+      grammar: number;
+      generalComment?: string;
+    }>;
+  }) => Promise<any>;
+  gradingSaving?: boolean;
+  gradingSaveError?: Error | null;
+  gradingSaveSuccess?: boolean;
 }) {
   const [cancelSlot, setCancelSlot] = useState<HSKSlot | null>(null);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [attendanceSlot, setAttendanceSlot] = useState<HSKSlot | null>(null);
   const [attendanceDialogOpen, setAttendanceDialogOpen] = useState(false);
-  const [attendanceStatus, setAttendanceStatus] = useState<"present" | "absent">("present");
-  const [attendanceNote, setAttendanceNote] = useState("");
+  const [attendanceRows, setAttendanceRows] = useState<AttendanceStudentRow[]>([]);
+  const [attendanceLoading, setAttendanceLoading] = useState(false);
+  const [attendanceLoadError, setAttendanceLoadError] = useState<string | null>(null);
   const [gradeSlot, setGradeSlot] = useState<HSKSlot | null>(null);
   const [gradeDialogOpen, setGradeDialogOpen] = useState(false);
-  const [gradeNotes, setGradeNotes] = useState("");
-  const [gradeScores, setGradeScores] = useState<Record<string, number>>({
-    listening: 70,
-    speaking: 70,
-    reading: 70,
-    writing: 70,
-    vocabulary: 70,
-    grammar: 70,
-  });
+  const [gradingRows, setGradingRows] = useState<GradingStudentRow[]>([]);
+  const [gradingLoading, setGradingLoading] = useState(false);
+  const [gradingLoadError, setGradingLoadError] = useState<string | null>(null);
   const [nowTs, setNowTs] = useState(() => Date.now());
 
   useEffect(() => {
@@ -539,12 +651,11 @@ export function MyBookingsTable({
   }, []);
 
   useEffect(() => {
-    if (evaluationSuccess && gradeDialogOpen) {
+    if (gradingSaveSuccess && gradeDialogOpen) {
       setGradeDialogOpen(false);
       setGradeSlot(null);
-      setGradeNotes("");
     }
-  }, [evaluationSuccess, gradeDialogOpen]);
+  }, [gradingSaveSuccess, gradeDialogOpen]);
 
   function openCancelDialog(slot: HSKSlot) {
     setCancelSlot(slot);
@@ -561,7 +672,7 @@ export function MyBookingsTable({
   const [dateRangeFilter, setDateRangeFilter] = useState<"all" | "today" | "week" | "month" | "custom">("all");
   const [customDateFrom, setCustomDateFrom] = useState("");
   const [customDateTo, setCustomDateTo] = useState("");
-  const [sortBy, setSortBy] = useState<"class_id" | "student_name" | "session_date" | "status">("session_date");
+  const [sortBy, setSortBy] = useState<"class_id" | "session_date" | "status">("session_date");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
@@ -593,7 +704,7 @@ export function MyBookingsTable({
     return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
   };
 
-  const renderSortIcon = (field: "class_id" | "student_name" | "session_date" | "status") => {
+  const renderSortIcon = (field: "class_id" | "session_date" | "status") => {
     if (sortBy !== field) return <ArrowUpDown className="h-3.5 w-3.5" />;
     return sortDirection === "asc" ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />;
   };
@@ -650,39 +761,113 @@ export function MyBookingsTable({
     return `${minutes} phút`;
   };
 
-  function openAttendanceDialog(slot: HSKSlot) {
+  async function openAttendanceDialog(slot: HSKSlot) {
+    if (!slot.class_id || !onLoadAttendance) return;
     setAttendanceSlot(slot);
-    setAttendanceStatus("present");
-    setAttendanceNote("");
+    setAttendanceLoading(true);
+    setAttendanceLoadError(null);
+    setAttendanceRows([]);
     setAttendanceDialogOpen(true);
+    try {
+      const rows = await onLoadAttendance({
+        classId: String(slot.class_id),
+        sessionDate: String(slot.session_date),
+      });
+      setAttendanceRows(rows ?? []);
+    } catch (error: any) {
+      setAttendanceLoadError(error?.message ?? "Không tải được danh sách học viên");
+    } finally {
+      setAttendanceLoading(false);
+    }
   }
 
-  function openGradeDialog(slot: HSKSlot) {
-    setGradeSlot(slot);
-    setGradeNotes("");
-    setGradeScores({
-      listening: 70,
-      speaking: 70,
-      reading: 70,
-      writing: 70,
-      vocabulary: 70,
-      grammar: 70,
+  const setAttendanceField = (
+    studentId: string,
+    patch: Partial<Pick<AttendanceStudentRow, "attendance_status" | "excuse_reason">>,
+  ) => {
+    setAttendanceRows((prev) =>
+      prev.map((row) =>
+        row.student_id === studentId
+          ? {
+              ...row,
+              ...patch,
+            }
+          : row,
+      ),
+    );
+  };
+
+  async function handleSaveAttendance() {
+    if (!attendanceSlot?.class_id || !onSaveAttendance) return;
+    const records = attendanceRows.map((row) => ({
+      studentId: row.student_id,
+      attendanceStatus: (row.attendance_status ?? "present") as AttendanceStatus,
+      excuseReason: row.excuse_reason ?? undefined,
+    }));
+    await onSaveAttendance({
+      classId: String(attendanceSlot.class_id),
+      sessionDate: String(attendanceSlot.session_date),
+      records,
     });
-    setGradeDialogOpen(true);
   }
 
-  function handleSubmitGrade() {
-    if (!gradeSlot?.student_id || !onSubmitEvaluation) return;
-    onSubmitEvaluation({
-      slotId: gradeSlot.slot_id,
-      studentId: gradeSlot.student_id,
-      listening: gradeScores.listening,
-      speaking: gradeScores.speaking,
-      reading: gradeScores.reading,
-      writing: gradeScores.writing,
-      vocabulary: gradeScores.vocabulary,
-      grammar: gradeScores.grammar,
-      generalComment: gradeNotes || undefined,
+  async function openGradeDialog(slot: HSKSlot) {
+    if (!slot.class_id || !onLoadGrading) return;
+    setGradeSlot(slot);
+    setGradingRows([]);
+    setGradingLoadError(null);
+    setGradingLoading(true);
+    setGradeDialogOpen(true);
+    try {
+      const rows = await onLoadGrading({
+        classId: String(slot.class_id),
+        sessionDate: String(slot.session_date),
+      });
+      setGradingRows(rows ?? []);
+    } catch (error: any) {
+      setGradingLoadError(error?.message ?? "Không tải được dữ liệu chấm điểm");
+    } finally {
+      setGradingLoading(false);
+    }
+  }
+
+  const setGradingField = (
+    studentId: string,
+    patch: Partial<
+      Pick<
+        GradingStudentRow,
+        "listening" | "speaking" | "reading" | "writing" | "vocabulary" | "grammar" | "general_comment"
+      >
+    >,
+  ) => {
+    setGradingRows((prev) =>
+      prev.map((row) =>
+        row.student_id === studentId
+          ? {
+              ...row,
+              ...patch,
+            }
+          : row,
+      ),
+    );
+  };
+
+  async function handleSubmitGrade() {
+    if (!gradeSlot?.class_id || !onSaveGrading) return;
+    const records = gradingRows.map((row) => ({
+      studentId: row.student_id,
+      listening: Number(row.listening ?? 70),
+      speaking: Number(row.speaking ?? 70),
+      reading: Number(row.reading ?? 70),
+      writing: Number(row.writing ?? 70),
+      vocabulary: Number(row.vocabulary ?? 70),
+      grammar: Number(row.grammar ?? 70),
+      generalComment: row.general_comment ?? undefined,
+    }));
+    await onSaveGrading({
+      classId: String(gradeSlot.class_id),
+      sessionDate: String(gradeSlot.session_date),
+      records,
     });
   }
 
@@ -710,7 +895,7 @@ export function MyBookingsTable({
           displayStatus === "ongoing" ? "Đang diễn ra" :
           displayStatus === "completed" ? "Đã hoàn thành" : "Sắp diễn ra";
 
-        const haystack = `${b.class_id ?? ""} ${b.slot_id} ${b.student_name ?? ""} ${(b as any).student_code ?? ""} ${b.student_id ?? ""} ${b.status ?? ""} ${displayStatusLabel}`
+        const haystack = `${b.class_id ?? ""} ${b.slot_id} ${b.status ?? ""} ${displayStatusLabel}`
           .toLowerCase();
         if (!haystack.includes(query)) return false;
       }
@@ -739,9 +924,6 @@ export function MyBookingsTable({
       if (sortBy === "class_id") {
         aValue = a.class_id ?? "";
         bValue = b.class_id ?? "";
-      } else if (sortBy === "student_name") {
-        aValue = a.student_name ?? "";
-        bValue = b.student_name ?? "";
       } else if (sortBy === "session_date") {
         aValue = parseIsoDate(a.session_date)?.getTime() ?? 0;
         bValue = parseIsoDate(b.session_date)?.getTime() ?? 0;
@@ -764,7 +946,7 @@ export function MyBookingsTable({
     return sortedBookings.slice(start, start + rowsPerPage);
   }, [currentPage, rowsPerPage, sortedBookings]);
 
-  const handleSort = (field: "class_id" | "student_name" | "session_date" | "status") => {
+  const handleSort = (field: "class_id" | "session_date" | "status") => {
     if (sortBy === field) {
       setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
     } else {
@@ -786,95 +968,192 @@ export function MyBookingsTable({
       />
 
       <Dialog open={attendanceDialogOpen} onOpenChange={setAttendanceDialogOpen}>
-        <DialogContent className="max-w-md" id="attendance-modal">
+        <DialogContent className="max-w-3xl" id="attendance-modal">
           <DialogHeader>
             <DialogTitle>Điểm danh học viên</DialogTitle>
             <DialogDescription>
-              {attendanceSlot?.student_name ?? "Học viên"} ({attendanceSlot?.student_id ?? "—"})
+              Lớp {attendanceSlot?.class_id ?? "—"} — {attendanceSlot ? new Date(attendanceSlot.session_date).toLocaleString("vi-VN") : "—"}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-3">
-            <div className="space-y-1">
-              <Label htmlFor="attendance-status">Trạng thái điểm danh</Label>
-              <Select
-                value={attendanceStatus}
-                onValueChange={(value) => setAttendanceStatus(value as "present" | "absent")}
-              >
-                <SelectTrigger id="attendance-status">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="present">Có mặt</SelectItem>
-                  <SelectItem value="absent">Vắng mặt</SelectItem>
-                </SelectContent>
-              </Select>
+            {attendanceLoadError && (
+              <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {attendanceLoadError}
+              </div>
+            )}
+
+            <div className="rounded-lg border border-border overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Tên học viên</TableHead>
+                    <TableHead>Mã học viên</TableHead>
+                    <TableHead>Điểm danh</TableHead>
+                    <TableHead>Lý do (có phép/không phép)</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {attendanceLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="py-6 text-center text-muted-foreground">Đang tải danh sách học viên...</TableCell>
+                    </TableRow>
+                  ) : attendanceRows.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="py-6 text-center text-muted-foreground">Không có học viên trong lớp.</TableCell>
+                    </TableRow>
+                  ) : (
+                    attendanceRows.map((row) => (
+                      <TableRow key={row.student_id}>
+                        <TableCell>{row.full_name ?? "—"}</TableCell>
+                        <TableCell className="font-mono text-xs">{row.staff_code ?? row.student_id}</TableCell>
+                        <TableCell className="min-w-[190px]">
+                          <Select
+                            value={row.attendance_status ?? "present"}
+                            onValueChange={(value) =>
+                              setAttendanceField(row.student_id, {
+                                attendance_status: value as AttendanceStatus,
+                              })
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="present">Có mặt</SelectItem>
+                              <SelectItem value="absent_excused">Vắng có phép</SelectItem>
+                              <SelectItem value="absent_unexcused">Vắng không phép</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            value={row.excuse_reason ?? ""}
+                            onChange={(event) =>
+                              setAttendanceField(row.student_id, {
+                                excuse_reason: event.target.value,
+                              })
+                            }
+                            placeholder="Nhập lý do (nếu vắng)..."
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
             </div>
 
-            <div className="space-y-1">
-              <Label htmlFor="attendance-note">Ghi chú</Label>
-              <Textarea
-                id="attendance-note"
-                rows={3}
-                value={attendanceNote}
-                onChange={(event) => setAttendanceNote(event.target.value)}
-                placeholder="Ghi chú điểm danh..."
-              />
-            </div>
-
-            <p className="text-xs text-muted-foreground">
-              Điểm danh hiện đang ở bản UI thử nghiệm, dữ liệu sẽ tích hợp lưu DB ở bước backend tiếp theo.
-            </p>
+            {attendanceSaveError && (
+              <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {attendanceSaveError.message}
+              </div>
+            )}
+            {attendanceSaveSuccess && (
+              <div className="rounded-md border border-green-300/60 bg-green-50 px-3 py-2 text-sm text-green-700">
+                Đã lưu điểm danh thành công.
+              </div>
+            )}
 
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setAttendanceDialogOpen(false)}>Đóng</Button>
-              <Button onClick={() => setAttendanceDialogOpen(false)}>Lưu điểm danh</Button>
+              <Button onClick={handleSaveAttendance} disabled={attendanceSaving || attendanceLoading || attendanceRows.length === 0}>
+                {attendanceSaving && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
+                Lưu điểm danh
+              </Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
 
       <Dialog open={gradeDialogOpen} onOpenChange={setGradeDialogOpen}>
-        <DialogContent className="max-w-lg" id="grade-modal">
+        <DialogContent className="w-[95vw] max-w-[95vw] xl:max-w-6xl max-h-[88vh] overflow-hidden" id="grade-modal">
           <DialogHeader>
             <DialogTitle>Chấm điểm học viên</DialogTitle>
             <DialogDescription>
-              {gradeSlot?.student_name ?? "Học viên"} ({gradeSlot?.student_id ?? "—"})
+              Lớp {gradeSlot?.class_id ?? "—"} — {gradeSlot ? new Date(gradeSlot.session_date).toLocaleString("vi-VN") : "—"}
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4">
-            {SKILL_KEYS.map((key) => (
-              <div key={key} className="space-y-1">
-                <div className="flex items-center justify-between text-sm">
-                  <Label>{SKILL_LABELS[key]}</Label>
-                  <span className="font-mono font-semibold text-primary">{gradeScores[key]}</span>
-                </div>
-                <Slider
-                  min={0}
-                  max={100}
-                  step={5}
-                  value={[gradeScores[key]]}
-                  onValueChange={([v]) => setGradeScores((prev) => ({ ...prev, [key]: v }))}
-                />
+          <div className="space-y-4 overflow-y-auto pr-1">
+            {gradingLoadError && (
+              <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {gradingLoadError}
               </div>
-            ))}
+            )}
 
-            <div className="space-y-1">
-              <Label htmlFor="grade-note">Nhận xét</Label>
-              <Textarea
-                id="grade-note"
-                rows={3}
-                value={gradeNotes}
-                onChange={(event) => setGradeNotes(event.target.value)}
-                placeholder="Nhận xét buổi học..."
-              />
+            <div className="rounded-lg border border-border overflow-hidden">
+              <div className="overflow-x-auto">
+                <Table className="min-w-[980px]">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Tên học viên</TableHead>
+                      <TableHead>Mã học viên</TableHead>
+                      <TableHead>Nghe</TableHead>
+                      <TableHead>Nói</TableHead>
+                      <TableHead>Đọc</TableHead>
+                      <TableHead>Viết</TableHead>
+                      <TableHead>Từ vựng</TableHead>
+                      <TableHead>Ngữ pháp</TableHead>
+                      <TableHead>Nhận xét</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {gradingLoading ? (
+                      <TableRow>
+                        <TableCell colSpan={9} className="py-6 text-center text-muted-foreground">Đang tải danh sách học viên...</TableCell>
+                      </TableRow>
+                    ) : gradingRows.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={9} className="py-6 text-center text-muted-foreground">Không có học viên trong lớp.</TableCell>
+                      </TableRow>
+                    ) : (
+                      gradingRows.map((row) => (
+                        <TableRow key={row.student_id}>
+                          <TableCell>{row.full_name ?? "—"}</TableCell>
+                          <TableCell className="font-mono text-xs">{row.staff_code ?? row.student_id}</TableCell>
+                          {(SKILL_KEYS as Array<keyof typeof SKILL_LABELS>).map((skillKey) => (
+                            <TableCell key={`${row.student_id}-${skillKey}`} className="w-[90px]">
+                              <Input
+                                type="number"
+                                min={0}
+                                max={100}
+                                value={String((row as any)[skillKey] ?? 70)}
+                                onChange={(event) => {
+                                  const n = Number(event.target.value);
+                                  const v = Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0;
+                                  setGradingField(row.student_id, { [skillKey]: v } as any);
+                                }}
+                              />
+                            </TableCell>
+                          ))}
+                          <TableCell className="min-w-[220px]">
+                            <Input
+                              value={row.general_comment ?? ""}
+                              onChange={(event) =>
+                                setGradingField(row.student_id, {
+                                  general_comment: event.target.value,
+                                })
+                              }
+                              placeholder="Nhận xét..."
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
 
-            {evaluationError && (
-              <div className="flex items-center gap-2 text-destructive text-sm">
-                <AlertTriangle className="h-4 w-4 shrink-0" />
-                {evaluationError.message}
+            {gradingSaveError && (
+              <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {gradingSaveError.message}
+              </div>
+            )}
+            {gradingSaveSuccess && (
+              <div className="rounded-md border border-green-300/60 bg-green-50 px-3 py-2 text-sm text-green-700">
+                Đã lưu chấm điểm thành công.
               </div>
             )}
 
@@ -882,9 +1161,9 @@ export function MyBookingsTable({
               <Button variant="outline" onClick={() => setGradeDialogOpen(false)}>Đóng</Button>
               <Button
                 onClick={handleSubmitGrade}
-                disabled={evaluationPending || !gradeSlot?.student_id || !onSubmitEvaluation}
+                disabled={gradingSaving || gradingLoading || gradingRows.length === 0 || !onSaveGrading}
               >
-                {evaluationPending && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
+                {gradingSaving && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
                 Lưu điểm
               </Button>
             </div>
@@ -900,7 +1179,7 @@ export function MyBookingsTable({
               setSearchQuery(event.target.value);
               setPage(1);
             }}
-            placeholder="Tìm kiếm mã lớp, mã slot, học viên, trạng thái..."
+            placeholder="Tìm kiếm mã lớp, mã slot, trạng thái..."
           />
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -995,7 +1274,7 @@ export function MyBookingsTable({
 
       <div className="rounded-xl border border-border bg-card overflow-hidden">
         <div className="overflow-x-auto">
-          <Table className="min-w-[860px]">
+          <Table className="min-w-[980px]">
             <TableHeader>
               <TableRow>
                 <TableHead className="min-w-[110px] whitespace-nowrap">
@@ -1006,16 +1285,6 @@ export function MyBookingsTable({
                   >
                     Mã lớp
                     {renderSortIcon("class_id")}
-                  </button>
-                </TableHead>
-                <TableHead className="min-w-[140px] whitespace-nowrap">
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
-                    onClick={() => handleSort("student_name")}
-                  >
-                    Học viên
-                    {renderSortIcon("student_name")}
                   </button>
                 </TableHead>
                 <TableHead className="min-w-[160px] whitespace-nowrap">
@@ -1039,6 +1308,8 @@ export function MyBookingsTable({
                     {renderSortIcon("status")}
                   </button>
                 </TableHead>
+                <TableHead className="min-w-[110px] whitespace-nowrap text-center">Điểm danh</TableHead>
+                <TableHead className="min-w-[110px] whitespace-nowrap text-center">Chấm điểm</TableHead>
                 <TableHead className="min-w-[80px] whitespace-nowrap text-right">Hành động</TableHead>
               </TableRow>
             </TableHeader>
@@ -1054,17 +1325,11 @@ export function MyBookingsTable({
                   (b.status === "confirmed" || b.status === "pending") &&
                   isFuture;
                 const canAttendance = displayStatus === "ongoing" || displayStatus === "completed";
-                const canGrade = !b.is_enrollment_only && b.status === "confirmed" && !!b.student_id;
+                const canGrade = displayStatus === "ongoing" || displayStatus === "completed";
 
                 return (
                   <TableRow key={b.slot_id}>
                     <TableCell className="font-mono text-xs whitespace-nowrap">{b.class_id ?? "—"}</TableCell>
-                    <TableCell className="whitespace-nowrap">
-                      <div className="font-medium truncate max-w-[130px]">{b.student_name ?? "—"}</div>
-                      <div className="font-mono text-xs text-muted-foreground truncate max-w-[130px]">
-                        {(b as any).student_code ?? b.student_id ?? "—"}
-                      </div>
-                    </TableCell>
                     <TableCell className="whitespace-nowrap text-sm">
                       {new Date(b.session_date).toLocaleString("vi-VN")}
                     </TableCell>
@@ -1073,6 +1338,12 @@ export function MyBookingsTable({
                     </TableCell>
                     <TableCell className="whitespace-nowrap">
                       {renderDisplayStatusBadge(displayStatus)}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-center">
+                      <Checkbox checked={Boolean((b as any).attendance_done)} disabled />
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-center">
+                      <Checkbox checked={Boolean((b as any).grading_done)} disabled />
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-right">
                       <DropdownMenu>
@@ -1095,7 +1366,7 @@ export function MyBookingsTable({
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             id={`action-attendance-${b.slot_id}`}
-                            disabled={!canAttendance}
+                            disabled={!canAttendance || !onLoadAttendance || !onSaveAttendance}
                             onClick={() => openAttendanceDialog(b)}
                           >
                             <ClipboardCheck className="h-4 w-4" />
@@ -1103,7 +1374,7 @@ export function MyBookingsTable({
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             id={`action-grade-${b.slot_id}`}
-                            disabled={!canGrade || !onSubmitEvaluation}
+                            disabled={!canGrade || !onLoadGrading || !onSaveGrading}
                             onClick={() => openGradeDialog(b)}
                           >
                             <ClipboardPen className="h-4 w-4" />
@@ -1117,7 +1388,7 @@ export function MyBookingsTable({
               })}
               {paginatedBookings.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                     Không tìm thấy lịch dạy nào phù hợp
                   </TableCell>
                 </TableRow>

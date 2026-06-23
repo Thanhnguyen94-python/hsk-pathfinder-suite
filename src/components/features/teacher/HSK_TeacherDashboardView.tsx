@@ -16,12 +16,19 @@ export function HSK_TeacherDashboardView() {
     pendingSlots,
     myBookings,
     penalties,
+    teacherProfile,
     claimSlot,
     cancelBooking,
     submitEvaluation,
     claimState,
     cancelState,
     evaluationState,
+    getSessionAttendance,
+    saveSessionAttendance,
+    attendanceState,
+    getSessionGrading,
+    saveSessionGrading,
+    gradingState,
     error: dashboardError,
   } = useHSKTeacherBookingViewModel();
 
@@ -38,6 +45,7 @@ export function HSK_TeacherDashboardView() {
     <div className="space-y-8">
       {/* Student skill lookup + Spider Chart + Evaluation form */}
       <StudentLookupPanel
+        teacherProfile={teacherProfile as any}
         myConfirmedSlots={myBookings}
         onLookup={lookup}
         lookupResult={lookupResult as any}
@@ -72,10 +80,16 @@ export function HSK_TeacherDashboardView() {
             myBookings={myBookings}
             onCancel={cancelBooking}
             cancelPending={cancelState.isPending}
-            onSubmitEvaluation={submitEvaluation}
-            evaluationPending={evaluationState.isPending}
-            evaluationError={evaluationState.error as Error | null}
-            evaluationSuccess={evaluationState.isSuccess}
+            onLoadAttendance={getSessionAttendance as any}
+            onSaveAttendance={saveSessionAttendance as any}
+            attendanceSaving={attendanceState.isPending}
+            attendanceSaveError={attendanceState.error as Error | null}
+            attendanceSaveSuccess={attendanceState.isSuccess}
+            onLoadGrading={getSessionGrading as any}
+            onSaveGrading={saveSessionGrading as any}
+            gradingSaving={gradingState.isPending}
+            gradingSaveError={gradingState.error as Error | null}
+            gradingSaveSuccess={gradingState.isSuccess}
           />
         </TabsContent>
         <TabsContent value="penalties" className="mt-6">

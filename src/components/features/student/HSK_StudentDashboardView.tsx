@@ -43,6 +43,7 @@ export function HSK_StudentDashboardView() {
     progress,
     bookings,
     enrollments,
+    sessionNotes,
     ratedSlots,
     assignments,
     submissions,
@@ -93,6 +94,26 @@ export function HSK_StudentDashboardView() {
     "…";
 
   const bookingsForTable = useMemo(() => {
+    const toSessionKey = (classId?: string | null, sessionDate?: string | null) => {
+      const ts = sessionDate ? new Date(sessionDate).getTime() : NaN;
+      return `${classId ?? ""}|${Number.isFinite(ts) ? ts : sessionDate ?? ""}`;
+    };
+
+    const noteBySession = new Map<string, string>();
+    for (const row of sessionNotes ?? []) {
+      const key = toSessionKey(row?.class_id, row?.session_date);
+      const note = String(row?.teacher_note ?? "").trim();
+      if (!key || !note) continue;
+      if (!noteBySession.has(key)) noteBySession.set(key, note);
+    }
+
+    for (const row of bookings ?? []) {
+      const key = toSessionKey(row?.class_id, row?.session_date);
+      const note = String(row?.teacher_note ?? "").trim();
+      if (!key || !note) continue;
+      if (!noteBySession.has(key)) noteBySession.set(key, note);
+    }
+
     const normalizeScheduleDays = (raw: any): Set<number> => {
       const src = Array.isArray(raw) ? raw.map((v) => Number(v)).filter((v) => !Number.isNaN(v)) : [];
       const out = new Set<number>();
@@ -134,6 +155,12 @@ export function HSK_StudentDashboardView() {
             teacher_staff_code: item.teacher_staff_code ?? null,
             session_date: makeIsoLike(cursor, item.start_time ?? "00:00:00"),
             actual_end_time: item.end_time ? makeIsoLike(cursor, item.end_time) : null,
+            teacher_note: noteBySession.get(
+              toSessionKey(
+                item.class_id ?? null,
+                makeIsoLike(cursor, item.start_time ?? "00:00:00"),
+              ),
+            ) ?? null,
             status: "confirmed",
             is_enrollment_only: true,
           });
@@ -151,7 +178,7 @@ export function HSK_StudentDashboardView() {
     if (bookings.length > 0) return bookings;
     if (rowsFromEnrollments.length > 0) return rowsFromEnrollments;
     return [];
-  }, [bookings, enrollments, accountMode]);
+  }, [bookings, enrollments, accountMode, sessionNotes]);
 
   return (
     <div className="space-y-8">

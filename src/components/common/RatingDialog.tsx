@@ -16,9 +16,13 @@ import { Textarea } from "@/components/ui/textarea";
 
 export function RatingDialog({
   slotId,
+  classId,
+  sessionDate,
   teacherId,
 }: {
   slotId: string;
+  classId: string;
+  sessionDate: string;
   teacherId: string;
 }) {
   const qc = useQueryClient();
@@ -27,7 +31,7 @@ export function RatingDialog({
   const [stars, setStars] = useState(5);
   const [comment, setComment] = useState("");
   const m = useMutation({
-    mutationFn: () => rate({ data: { slotId, teacherId, stars, comment } }),
+    mutationFn: () => rate({ data: { slotId, classId, sessionDate, teacherId, stars, comment } }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["my-ratings"] });
       qc.invalidateQueries({ queryKey: ["student-dash"] });

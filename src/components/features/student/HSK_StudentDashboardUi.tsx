@@ -1,7 +1,10 @@
 import { useMemo, useState } from "react";
-import { RatingDialog } from "@/components/common/RatingDialog";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
+import { rateTeacher } from "@/lib/hsk.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,6 +15,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -27,6 +38,14 @@ import {
   PaginationPrevious,
   PaginationNext,
 } from "@/components/ui/pagination";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Progress } from "@/components/ui/progress";
 import {
   Table,
@@ -37,7 +56,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2 } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, MoreHorizontal, Star } from "lucide-react";
 import type { HSKSlot } from "@/types/hsk-models/hsk-booking.types";
 import {
   BOOKING_STATUS_LABELS,
@@ -208,9 +227,43 @@ export function BookingsTable({
   ratedSlots: Set<any>;
   onCancel: (slotId: string) => void;
 }) {
+  const qc = useQueryClient();
+  const rate = useServerFn(rateTeacher);
+
   // Cancel confirm dialog state
   const [cancelSlot, setCancelSlot] = useState<HSKSlot | null>(null);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+
+  const [ratingDialogOpen, setRatingDialogOpen] = useState(false);
+  const [ratingTarget, setRatingTarget] = useState<HSKSlot | null>(null);
+  const [ratingStars, setRatingStars] = useState(5);
+  const [ratingComment, setRatingComment] = useState("");
+
+  const rateMutation = useMutation({
+    mutationFn: () => {
+      if (!ratingTarget?.teacher_id || !ratingTarget?.class_id || !ratingTarget?.session_date) {
+        throw new Error("Thiếu thông tin buổi học để đánh giá");
+      }
+      return rate({
+        data: {
+          slotId: ratingTarget.slot_id,
+          classId: ratingTarget.class_id,
+          sessionDate: ratingTarget.session_date,
+          teacherId: ratingTarget.teacher_id,
+          stars: ratingStars,
+          comment: ratingComment,
+        },
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["my-ratings"] });
+      qc.invalidateQueries({ queryKey: ["student-dash"] });
+      setRatingDialogOpen(false);
+      setRatingTarget(null);
+      setRatingComment("");
+      setRatingStars(5);
+    },
+  });
 
   function openCancelDialog(slot: HSKSlot) {
     setCancelSlot(slot);
@@ -221,6 +274,21 @@ export function BookingsTable({
     if (cancelSlot) onCancel(cancelSlot.slot_id);
     setCancelDialogOpen(false);
   }
+
+  function openRatingDialog(slot: HSKSlot) {
+    setRatingTarget(slot);
+    setRatingStars(5);
+    setRatingComment("");
+    setRatingDialogOpen(true);
+  }
+
+  const toSessionKey = (classId?: string | null, sessionDate?: string | null) => {
+    const ts = sessionDate ? new Date(sessionDate).getTime() : NaN;
+    return `${classId ?? ""}|${Number.isFinite(ts) ? ts : sessionDate ?? ""}`;
+  };
+
+  const isRatedBooking = (slot: HSKSlot) =>
+    ratedSlots.has(slot.slot_id) || ratedSlots.has(toSessionKey(slot.class_id ?? null, slot.session_date));
 
   // Hàm tính độ dài buổi học (phút)
   const getDuration = (start: string, end?: string | null) => {
@@ -394,6 +462,60 @@ export function BookingsTable({
         onConfirm={handleConfirmCancel}
       />
 
+      <Dialog open={ratingDialogOpen} onOpenChange={setRatingDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Đánh giá buổi học</DialogTitle>
+            <DialogDescription>
+              {ratingTarget?.teacher_name ?? "Giáo viên"} · {ratingTarget?.teacher_staff_code ?? ratingTarget?.teacher_id ?? "—"}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex justify-center gap-1 py-2">
+            {[1, 2, 3, 4, 5].map((n) => (
+              <button
+                key={n}
+                type="button"
+                onClick={() => setRatingStars(n)}
+                className="p-1 transition-transform hover:scale-110"
+              >
+                <Star
+                  className={`h-8 w-8 ${
+                    n <= ratingStars ? "fill-warning text-warning" : "text-muted-foreground"
+                  }`}
+                />
+              </button>
+            ))}
+          </div>
+
+          <Textarea
+            placeholder="Nhận xét buổi học (tuỳ chọn)"
+            value={ratingComment}
+            onChange={(e) => setRatingComment(e.target.value)}
+            maxLength={500}
+            rows={3}
+          />
+
+          {rateMutation.isError && (
+            <p className="text-sm text-destructive">{(rateMutation.error as Error).message}</p>
+          )}
+
+          <DialogFooter>
+            <Button
+              onClick={() => rateMutation.mutate()}
+              disabled={
+                rateMutation.isPending ||
+                !ratingTarget?.teacher_id ||
+                !ratingTarget?.class_id ||
+                !ratingTarget?.session_date
+              }
+            >
+              {rateMutation.isPending ? "Đang gửi..." : "Gửi đánh giá"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div className="mb-4 space-y-3 rounded-xl border border-border bg-card p-4">
         <div className="grid gap-3 xl:grid-cols-[1.5fr_auto]">
           <Input
@@ -556,7 +678,7 @@ export function BookingsTable({
                   {renderSortIcon("status")}
                 </button>
               </TableHead>
-              <TableHead className="min-w-[120px] whitespace-nowrap"></TableHead>
+              <TableHead className="min-w-[140px] whitespace-nowrap text-right">Hành động</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -607,27 +729,56 @@ export function BookingsTable({
                 <TableCell className="whitespace-nowrap">
                   <StatusBadge booking={b} />
                 </TableCell>
-                <TableCell className="space-x-2 whitespace-nowrap">
-                  {!b.is_enrollment_only && (b.status === "pending" || b.status === "confirmed") && new Date(b.session_date) > new Date() && (
-                    <Button
-                      id={`btn-cancel-${b.slot_id}`}
-                      size="sm"
-                      variant="outline"
-                      className="h-7 px-2 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
-                      onClick={() => openCancelDialog(b)}
-                    >
-                      Huỷ
-                    </Button>
-                  )}
-                  {!b.is_enrollment_only && b.teacher_id && new Date(b.session_date) <= new Date() && (b.status === "confirmed" || b.status === "pending") && !ratedSlots.has(b.slot_id) && (
-                    <RatingDialog slotId={b.slot_id} teacherId={b.teacher_id} />
-                  )}
-                  {!b.is_enrollment_only && ratedSlots.has(b.slot_id) && (
-                    <span className="text-xs text-success">Đã đánh giá</span>
-                  )}
-                  {b.is_enrollment_only && (
-                    <span className="text-xs text-muted-foreground">Lớp đã gán</span>
-                  )}
+                <TableCell className="whitespace-nowrap">
+                  <div className="flex items-center justify-end gap-2">
+                    {isRatedBooking(b) && <span className="text-xs text-success">Đã đánh giá</span>}
+
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Mở menu hành động">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        {!b.is_enrollment_only &&
+                          (b.status === "pending" || b.status === "confirmed") &&
+                          new Date(b.session_date) > new Date() && (
+                            <DropdownMenuItem
+                              id={`btn-cancel-${b.slot_id}`}
+                              className="text-destructive focus:text-destructive"
+                              onClick={() => openCancelDialog(b)}
+                            >
+                              Huỷ buổi học
+                            </DropdownMenuItem>
+                          )}
+
+                        {b.teacher_id &&
+                          new Date(b.session_date) <= new Date() &&
+                          (b.status === "confirmed" || b.status === "pending") &&
+                          !isRatedBooking(b) && (
+                            <DropdownMenuItem onClick={() => openRatingDialog(b)}>
+                              Đánh giá buổi học
+                            </DropdownMenuItem>
+                          )}
+
+                        {isRatedBooking(b) && (
+                          <DropdownMenuItem disabled>Đã đánh giá buổi học</DropdownMenuItem>
+                        )}
+
+                        {!isRatedBooking(b) &&
+                          !(
+                            !b.is_enrollment_only &&
+                            (b.status === "pending" || b.status === "confirmed") &&
+                            new Date(b.session_date) > new Date()
+                          ) &&
+                          !(
+                            b.teacher_id &&
+                            new Date(b.session_date) <= new Date() &&
+                            (b.status === "confirmed" || b.status === "pending")
+                          ) && <DropdownMenuItem disabled>Không có hành động</DropdownMenuItem>}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}

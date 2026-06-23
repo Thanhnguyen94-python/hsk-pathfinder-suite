@@ -5,6 +5,8 @@ import {
   claimSlot,
   expireStaleFreezes,
   freezeCourse,
+  getClassSessionAttendance,
+  getClassSessionGrading,
   getStudentDashboard,
   getStudentSkillsById,
   getTeacherDashboard,
@@ -13,6 +15,8 @@ import {
   studentCancelBooking,
   submitAssignment,
   submitEvaluation,
+  saveClassSessionAttendance,
+  saveClassSessionGrading,
   teacherCancelBooking,
   unfreezeCourse,
   getMe,
@@ -107,14 +111,25 @@ export function useHSKStudentBookingViewModel() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["my-submissions"] }),
   });
 
-  const ratedSlots = useMemo(
-    () => new Set((ratingsQuery.data ?? []).map((r: any) => r.slot_id)),
-    [ratingsQuery.data],
-  );
+  const ratedSlots = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of ratingsQuery.data ?? []) {
+      const slotId = String((r as any).slot_id ?? "").trim();
+      if (slotId) set.add(slotId);
+      const classId = String((r as any).class_id ?? "").trim();
+      const sessionDate = String((r as any).session_date ?? "").trim();
+      if (classId && sessionDate) {
+        const ts = new Date(sessionDate).getTime();
+        set.add(`${classId}|${Number.isFinite(ts) ? ts : sessionDate}`);
+      }
+    }
+    return set;
+  }, [ratingsQuery.data]);
 
   const progress = (dashQuery.data?.progress ?? []) as any[];
   const bookings = (dashQuery.data?.bookings ?? []) as any[];
   const enrollments = (dashQuery.data?.enrollments ?? []) as any[];
+  const sessionNotes = (dashQuery.data?.sessionNotes ?? []) as any[];
 
   return {
     me: meQuery.data,
@@ -122,6 +137,7 @@ export function useHSKStudentBookingViewModel() {
     progress,
     bookings,
     enrollments,
+    sessionNotes,
     ratedSlots,
     assignments: assignmentsQuery.data ?? [],
     submissions: submissionsQuery.data ?? [],
@@ -150,6 +166,10 @@ export function useHSKTeacherBookingViewModel() {
   const claimFn = useServerFn(claimSlot);
   const cancelFn = useServerFn(teacherCancelBooking);
   const submitEvalFn = useServerFn(submitEvaluation);
+  const attendanceFn = useServerFn(getClassSessionAttendance);
+  const saveAttendanceFn = useServerFn(saveClassSessionAttendance);
+  const gradingFn = useServerFn(getClassSessionGrading);
+  const saveGradingFn = useServerFn(saveClassSessionGrading);
 
   const dashQuery = useQuery({
     queryKey: ["teacher-dash"],
@@ -181,18 +201,63 @@ export function useHSKTeacherBookingViewModel() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["teacher-dash"] }),
   });
 
+  const saveAttendanceMutation = useMutation({
+    mutationFn: (payload: {
+      classId: string;
+      sessionDate: string;
+      records: Array<{
+        studentId: string;
+        attendanceStatus: "present" | "absent_excused" | "absent_unexcused";
+        excuseReason?: string;
+      }>;
+    }) => saveAttendanceFn({ data: payload }),
+  });
+
+  const saveGradingMutation = useMutation({
+    mutationFn: (payload: {
+      classId: string;
+      sessionDate: string;
+      records: Array<{
+        studentId: string;
+        listening: number;
+        speaking: number;
+        reading: number;
+        writing: number;
+        vocabulary: number;
+        grammar: number;
+        generalComment?: string;
+      }>;
+    }) => saveGradingFn({ data: payload }),
+  });
+
   return {
     pendingSlots: (dashQuery.data?.pendingSlots ?? []) as HSKSlot[],
     myBookings: (dashQuery.data?.myBookings ?? []) as HSKSlot[],
     penalties: (dashQuery.data?.penalties ?? []) as any[],
+    teacherProfile: (dashQuery.data?.teacherProfile ?? null) as
+      | {
+          full_name?: string | null;
+          staff_code?: string | null;
+          avg_stars?: number;
+          total_reviews?: number;
+        }
+      | null,
     isLoading: dashQuery.isLoading,
     error: dashQuery.error,
     claimSlot: claimMutation.mutate,
     cancelBooking: cancelMutation.mutate,
     submitEvaluation: evaluationMutation.mutate,
+    getSessionAttendance: (payload: { classId: string; sessionDate: string }) =>
+      attendanceFn({ data: payload }),
+    saveSessionAttendance: saveAttendanceMutation.mutateAsync,
+    getSessionGrading: (payload: { classId: string; sessionDate: string }) =>
+      gradingFn({ data: payload }),
+    saveSessionGrading: saveGradingMutation.mutateAsync,
     claimState: claimMutation,
     cancelState: cancelMutation,
     evaluationState: evaluationMutation,
+    attendanceState: saveAttendanceMutation,
+    gradingState: saveGradingMutation,
   };
 }
 

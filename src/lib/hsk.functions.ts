@@ -377,7 +377,7 @@ export const getStudentDashboard = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { data: me, error: meErr } = await supabaseAdmin
       .from("users")
-      .select("specific_id")
+      .select("id, specific_id, staff_code")
       .eq("id", context.userId)
       .maybeSingle();
     if (meErr) throw new Error(meErr.message);
@@ -446,6 +446,60 @@ export const getStudentDashboard = createServerFn({ method: "GET" })
         ...enrollmentsRows.map((r: any) => r?.classes?.teacher_id).filter(Boolean),
       ]),
     ) as string[];
+
+    const studentKeys = Array.from(
+      new Set([
+        String(me.specific_id ?? "").trim(),
+        String((me as any).id ?? "").trim(),
+        String((me as any).staff_code ?? "").trim(),
+      ].filter(Boolean)),
+    );
+
+    const gradeRowsRes = await supabaseAdmin
+      .from("class_student_grades")
+      .select("class_id, session_date, student_id, general_comment");
+    if (gradeRowsRes.error && !isMissingTableError(String(gradeRowsRes.error.message ?? gradeRowsRes.error))) {
+      throw new Error(gradeRowsRes.error.message);
+    }
+    const gradeRows = (gradeRowsRes.data ?? []).filter((r: any) =>
+      studentKeys.includes(String(r.student_id ?? "").trim()),
+    );
+
+    const evalRowsRes = await supabaseAdmin
+      .from("session_evaluations")
+      .select("slot_id, student_id, general_comment");
+    if (evalRowsRes.error && !isMissingTableError(String(evalRowsRes.error.message ?? evalRowsRes.error))) {
+      throw new Error(evalRowsRes.error.message);
+    }
+    const evalRows = (evalRowsRes.data ?? []).filter((r: any) =>
+      studentKeys.includes(String(r.student_id ?? "").trim()),
+    );
+
+    const toSessionKey = (classId?: string | null, sessionDate?: string | null) => {
+      const ts = sessionDate ? new Date(sessionDate).getTime() : NaN;
+      return `${classId ?? ""}|${Number.isFinite(ts) ? ts : sessionDate ?? ""}`;
+    };
+
+    const gradeNoteBySession = new Map<string, string>();
+    for (const row of gradeRows) {
+      const note = String((row as any).general_comment ?? "").trim();
+      if (!note) continue;
+      const key = toSessionKey((row as any).class_id, (row as any).session_date);
+      if (key && !gradeNoteBySession.has(key)) {
+        gradeNoteBySession.set(key, note);
+      }
+    }
+
+    const evalNoteBySlot = new Map<string, string>();
+    for (const row of evalRows) {
+      const slotId = String((row as any).slot_id ?? "").trim();
+      const note = String((row as any).general_comment ?? "").trim();
+      if (!slotId || !note) continue;
+      if (!evalNoteBySlot.has(slotId)) {
+        evalNoteBySlot.set(slotId, note);
+      }
+    }
+
     const users = teacherIds.length
       ? await supabaseAdmin
           .from("users")
@@ -462,7 +516,19 @@ export const getStudentDashboard = createServerFn({ method: "GET" })
         ...b,
         teacher_name: b.teacher_id ? nameMap.get(b.teacher_id) ?? null : null,
         teacher_staff_code: b.teacher_id ? teacherCodeMap.get(b.teacher_id) ?? null : null,
+        teacher_note:
+          b.teacher_note ??
+          evalNoteBySlot.get(String(b.slot_id ?? "").trim()) ??
+          gradeNoteBySession.get(toSessionKey(b.class_id, b.session_date)) ??
+          null,
       })),
+      sessionNotes: gradeRows
+        .map((row: any) => ({
+          class_id: row.class_id ?? null,
+          session_date: row.session_date ?? null,
+          teacher_note: row.general_comment ?? null,
+        }))
+        .filter((row: any) => row.class_id && row.session_date && String(row.teacher_note ?? "").trim().length > 0),
       enrollments: enrollmentsRows.map((row: any) => ({
         class_id: row.class_id,
         enrolled_at: row.enrolled_at,
@@ -538,6 +604,61 @@ export const getTeacherDashboard = createServerFn({ method: "GET" })
         .order("created_at", { ascending: false }),
       classesQuery,
     ]);
+
+    const [teacherProfileRes, teacherRatingStatsRes, teacherSessionRatingsRes, teacherRatingsLegacyRes] = await Promise.all([
+      supabaseAdmin
+        .from("users")
+        .select("full_name, staff_code, specific_id")
+        .eq("id", context.userId)
+        .maybeSingle(),
+      supabaseAdmin
+        .from("teacher_rating_stats")
+        .select("teacher_id, avg_stars, total_reviews")
+        .in("teacher_id", teacherKeys),
+      supabaseAdmin
+        .from("teacher_session_ratings")
+        .select("teacher_id, stars")
+        .in("teacher_id", teacherKeys),
+      supabaseAdmin
+        .from("teacher_ratings")
+        .select("teacher_id, stars")
+        .in("teacher_id", teacherKeys),
+    ]);
+
+    if (teacherProfileRes.error) throw new Error(teacherProfileRes.error.message);
+    if (teacherRatingStatsRes.error && !isMissingTableError(String(teacherRatingStatsRes.error.message ?? teacherRatingStatsRes.error))) {
+      throw new Error(teacherRatingStatsRes.error.message);
+    }
+    if (teacherSessionRatingsRes.error && !isMissingTableError(String(teacherSessionRatingsRes.error.message ?? teacherSessionRatingsRes.error))) {
+      throw new Error(teacherSessionRatingsRes.error.message);
+    }
+    if (teacherRatingsLegacyRes.error && !isMissingTableError(String(teacherRatingsLegacyRes.error.message ?? teacherRatingsLegacyRes.error))) {
+      throw new Error(teacherRatingsLegacyRes.error.message);
+    }
+
+    const teacherStatsRows = teacherRatingStatsRes.data ?? [];
+    const teacherSessionRows = teacherSessionRatingsRes.data ?? [];
+    const teacherLegacyRows = teacherRatingsLegacyRes.data ?? [];
+
+    let totalReviews = 0;
+    let starSum = 0;
+    if (teacherStatsRows.length > 0) {
+      for (const row of teacherStatsRows as any[]) {
+        const count = Number(row.total_reviews ?? 0);
+        const avg = Number(row.avg_stars ?? 0);
+        if (count > 0) {
+          totalReviews += count;
+          starSum += avg * count;
+        }
+      }
+    } else if (teacherSessionRows.length > 0) {
+      totalReviews = teacherSessionRows.length;
+      starSum = teacherSessionRows.reduce((sum: number, row: any) => sum + Number(row.stars ?? 0), 0);
+    } else {
+      totalReviews = teacherLegacyRows.length;
+      starSum = teacherLegacyRows.reduce((sum: number, row: any) => sum + Number(row.stars ?? 0), 0);
+    }
+    const avgStars = totalReviews > 0 ? Math.round((starSum / totalReviews) * 10) / 10 : 0;
 
     const pendingMissing = pending.error
       ? isMissingTableError(String(pending.error.message ?? pending.error))
@@ -703,27 +824,13 @@ export const getTeacherDashboard = createServerFn({ method: "GET" })
       return `${yyyy}-${mm}-${dd}T${normalizeTimeValue(hhmmss)}`;
     };
 
-    const getBookingKey = (classId?: string | null, studentId?: string | null, sessionDate?: string | null) => {
-      const ts = sessionDate ? new Date(sessionDate).getTime() : NaN;
-      return `${classId ?? ""}|${studentId ?? ""}|${Number.isFinite(ts) ? ts : sessionDate ?? ""}`;
-    };
-
     const mineRows = mineRowsRaw.map(enrichBooking);
-    const existingKeys = new Set(
-      mineRows.map((row: any) => getBookingKey(row.class_id, row.student_id, row.session_date)),
+    const existingSessionKeys = new Set(
+      mineRows.map((row: any) => {
+        const ts = row?.session_date ? new Date(row.session_date).getTime() : NaN;
+        return `${row?.class_id ?? ""}|${Number.isFinite(ts) ? ts : row?.session_date ?? ""}`;
+      }),
     );
-
-    const studentsByClassFromBookings = new Map<string, Array<{ student_id: string; enrolled_at?: string | null }>>();
-    for (const row of mineRowsRaw) {
-      const classId = String(row?.class_id ?? "");
-      const studentId = String(row?.student_id ?? "");
-      if (!classId || !studentId) continue;
-      const current = studentsByClassFromBookings.get(classId) ?? [];
-      if (!current.some((x) => String(x.student_id) === studentId)) {
-        current.push({ student_id: studentId, enrolled_at: row?.created_at ?? null });
-      }
-      studentsByClassFromBookings.set(classId, current);
-    }
 
     const enrollmentsByClass = new Map<string, any[]>();
     for (const row of classEnrollments) {
@@ -738,15 +845,6 @@ export const getTeacherDashboard = createServerFn({ method: "GET" })
     for (const cls of classes) {
       const classId = String(cls.class_id ?? "");
       if (!classId) continue;
-
-      const studentsFromEnrollments = enrollmentsByClass.get(classId) ?? [];
-      const studentsFromBookings = studentsByClassFromBookings.get(classId) ?? [];
-      const students =
-        studentsFromEnrollments.length > 0
-          ? studentsFromEnrollments
-          : studentsFromBookings.length > 0
-            ? studentsFromBookings
-            : [{ student_id: null, enrolled_at: null }];
 
       const totalLessons = Math.max(1, Number(cls.total_lessons ?? 15));
       const baseDate = cls.start_date
@@ -768,40 +866,482 @@ export const getTeacherDashboard = createServerFn({ method: "GET" })
         cursor.setDate(cursor.getDate() + 1);
       }
 
-      for (const student of students) {
-        const studentId = student?.student_id ? String(student.student_id) : null;
-        for (let index = 0; index < lessonDates.length; index += 1) {
-          const date = lessonDates[index];
-          const sessionDate = makeIsoLike(date, cls.start_time ?? "00:00:00");
-          const key = getBookingKey(classId, studentId, sessionDate);
-          if (existingKeys.has(key)) continue;
+      for (let index = 0; index < lessonDates.length; index += 1) {
+        const date = lessonDates[index];
+        const sessionDate = makeIsoLike(date, cls.start_time ?? "00:00:00");
+        const ts = new Date(sessionDate).getTime();
+        const sessionKey = `${classId}|${Number.isFinite(ts) ? ts : sessionDate}`;
+        if (existingSessionKeys.has(sessionKey)) continue;
 
-          generatedRows.push({
-            slot_id: `${classId}-${studentId ?? "NO-STUDENT"}-L${String(index + 1).padStart(2, "0")}`,
-            class_id: classId,
-            course_name: cls.class_name ?? classId,
-            student_id: studentId,
-            teacher_id: me.specific_id,
-            session_date: sessionDate,
-            session_end_date: cls.end_time ? makeIsoLike(date, cls.end_time) : null,
-            status: cls.status === "completed" ? "completed" : "confirmed",
-            student_name: studentId ? nameMap.get(toKey(studentId)) ?? null : "Chưa gán học viên",
-            student_code: studentId ? codeMap.get(toKey(studentId)) ?? studentId : null,
-            is_enrollment_only: true,
-          });
-        }
+        generatedRows.push({
+          slot_id: `${classId}-L${String(index + 1).padStart(2, "0")}`,
+          class_id: classId,
+          course_name: cls.class_name ?? classId,
+          teacher_id: me.specific_id,
+          session_date: sessionDate,
+          session_end_date: cls.end_time ? makeIsoLike(date, cls.end_time) : null,
+          status: cls.status === "completed" ? "completed" : "confirmed",
+          is_enrollment_only: true,
+        });
       }
     }
 
-    const myBookings = [...mineRows, ...generatedRows].sort((a: any, b: any) =>
+    const mergedRows = [...mineRows, ...generatedRows];
+    const sessionMap = new Map<string, any>();
+    for (const row of mergedRows) {
+      const ts = row?.session_date ? new Date(row.session_date).getTime() : NaN;
+      const key = `${row?.class_id ?? ""}|${Number.isFinite(ts) ? ts : row?.session_date ?? ""}`;
+      const existing = sessionMap.get(key);
+      if (!existing) {
+        sessionMap.set(key, row);
+        continue;
+      }
+      const existingScore = existing?.is_enrollment_only ? 0 : 1;
+      const nextScore = row?.is_enrollment_only ? 0 : 1;
+      if (nextScore > existingScore) {
+        sessionMap.set(key, row);
+      }
+    }
+
+    const myBookings = Array.from(sessionMap.values()).sort((a: any, b: any) =>
       String(a.session_date ?? "").localeCompare(String(b.session_date ?? "")),
     );
 
+    const classStudentCountMap = new Map<string, number>();
+    for (const [classId, rows] of enrollmentsByClass.entries()) {
+      const unique = new Set((rows ?? []).map((r: any) => String(r.student_id ?? "")).filter(Boolean));
+      classStudentCountMap.set(classId, unique.size);
+    }
+
+    const requiredCountMap = new Map<string, number>();
+    const mineParticipants = new Map<string, Set<string>>();
+    for (const row of mineRowsRaw) {
+      const ts = row?.session_date ? new Date(row.session_date).getTime() : NaN;
+      const key = `${row?.class_id ?? ""}|${Number.isFinite(ts) ? ts : row?.session_date ?? ""}`;
+      if (!mineParticipants.has(key)) mineParticipants.set(key, new Set<string>());
+      const sid = String(row?.student_id ?? "").trim();
+      if (sid) mineParticipants.get(key)?.add(sid);
+    }
+
+    for (const row of myBookings) {
+      const ts = row?.session_date ? new Date(row.session_date).getTime() : NaN;
+      const key = `${row?.class_id ?? ""}|${Number.isFinite(ts) ? ts : row?.session_date ?? ""}`;
+      const participantCount = mineParticipants.get(key)?.size ?? 0;
+      const classCount = classStudentCountMap.get(String(row?.class_id ?? "")) ?? 0;
+      const singleFallback = row?.student_id ? 1 : 0;
+      const required = Math.max(participantCount, classCount, singleFallback);
+      requiredCountMap.set(key, required);
+    }
+
+    const attendanceCountMap = new Map<string, number>();
+    const gradingCountMap = new Map<string, number>();
+
+    if (classIds.length > 0) {
+      const [attendanceRows, gradingRows] = await Promise.all([
+        supabaseAdmin
+          .from("class_attendance_records")
+          .select("class_id, session_date, student_id")
+          .in("class_id", classIds),
+        supabaseAdmin
+          .from("class_student_grades")
+          .select("class_id, session_date, student_id")
+          .in("class_id", classIds),
+      ]);
+
+      const attendanceMissing = attendanceRows.error
+        ? isMissingTableError(String(attendanceRows.error.message ?? attendanceRows.error))
+        : false;
+      const gradingMissing = gradingRows.error
+        ? isMissingTableError(String(gradingRows.error.message ?? gradingRows.error))
+        : false;
+      if (attendanceRows.error && !attendanceMissing) throw new Error(attendanceRows.error.message);
+      if (gradingRows.error && !gradingMissing) throw new Error(gradingRows.error.message);
+
+      const attendanceSets = new Map<string, Set<string>>();
+      for (const row of attendanceRows.data ?? []) {
+        const ts = row?.session_date ? new Date(row.session_date).getTime() : NaN;
+        const key = `${row?.class_id ?? ""}|${Number.isFinite(ts) ? ts : row?.session_date ?? ""}`;
+        if (!attendanceSets.has(key)) attendanceSets.set(key, new Set<string>());
+        const sid = String(row?.student_id ?? "").trim();
+        if (sid) attendanceSets.get(key)?.add(sid);
+      }
+      for (const [k, set] of attendanceSets.entries()) attendanceCountMap.set(k, set.size);
+
+      const gradingSets = new Map<string, Set<string>>();
+      for (const row of gradingRows.data ?? []) {
+        const ts = row?.session_date ? new Date(row.session_date).getTime() : NaN;
+        const key = `${row?.class_id ?? ""}|${Number.isFinite(ts) ? ts : row?.session_date ?? ""}`;
+        if (!gradingSets.has(key)) gradingSets.set(key, new Set<string>());
+        const sid = String(row?.student_id ?? "").trim();
+        if (sid) gradingSets.get(key)?.add(sid);
+      }
+      for (const [k, set] of gradingSets.entries()) gradingCountMap.set(k, set.size);
+    }
+
+    const myBookingsWithFlags = myBookings.map((row: any) => {
+      const ts = row?.session_date ? new Date(row.session_date).getTime() : NaN;
+      const key = `${row?.class_id ?? ""}|${Number.isFinite(ts) ? ts : row?.session_date ?? ""}`;
+      const required = requiredCountMap.get(key) ?? 0;
+      const attendanceCount = attendanceCountMap.get(key) ?? 0;
+      const gradingCount = gradingCountMap.get(key) ?? 0;
+      return {
+        ...row,
+        attendance_done: required > 0 ? attendanceCount >= required : attendanceCount > 0,
+        grading_done: required > 0 ? gradingCount >= required : gradingCount > 0,
+      };
+    });
+
     return {
       pendingSlots: pendingRows.map(enrichBooking),
-      myBookings,
+      myBookings: myBookingsWithFlags,
       penalties: penaltyRows,
+      teacherProfile: {
+        full_name: teacherProfileRes.data?.full_name ?? null,
+        staff_code:
+          teacherProfileRes.data?.staff_code ?? teacherProfileRes.data?.specific_id ?? me.specific_id,
+        avg_stars: avgStars,
+        total_reviews: totalReviews,
+      },
     };
+  });
+
+export const getClassSessionAttendance = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        classId: z.string().min(1),
+        sessionDate: z.string().min(1),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const me = await getCurrentUserRow(context);
+    const role = normalizeRole(me.role);
+    const isAdmin = role === "admin";
+
+    const { data: classRow, error: classErr } = await supabaseAdmin
+      .from("classes")
+      .select("class_id, teacher_id")
+      .eq("class_id", data.classId)
+      .maybeSingle();
+    if (classErr) throw new Error(classErr.message);
+    if (!classRow) throw new Error("Class not found");
+
+    const toKey = (v: unknown) => String(v ?? "").trim().toLowerCase();
+    const teacherKeys = new Set([toKey(me.id), toKey(me.specific_id), toKey((me as any).staff_code)]);
+    if (!isAdmin && !teacherKeys.has(toKey(classRow.teacher_id))) {
+      throw new Error("Forbidden");
+    }
+
+    const parsedSession = new Date(data.sessionDate);
+    if (Number.isNaN(parsedSession.getTime())) throw new Error("Invalid sessionDate");
+    const sessionIso = parsedSession.toISOString();
+
+    const { data: enrollmentRows, error: enrollmentErr } = await supabaseAdmin
+      .from("class_enrollments")
+      .select("student_id")
+      .eq("class_id", data.classId);
+    if (enrollmentErr) {
+      const m = String(enrollmentErr.message ?? enrollmentErr);
+      if (!m.includes("Could not find the table") && !m.includes("does not exist") && !m.includes("42P01")) {
+        throw new Error(enrollmentErr.message);
+      }
+    }
+    const studentIds = Array.from(
+      new Set((enrollmentRows ?? []).map((r: any) => String(r.student_id ?? "")).filter(Boolean)),
+    ) as string[];
+
+    const users = studentIds.length
+      ? await supabaseAdmin.from("users").select("id, specific_id, staff_code, full_name")
+      : { data: [], error: null };
+    if (users.error) throw new Error(users.error.message);
+
+    const idSet = new Set(studentIds.map((v) => String(v).trim()));
+    const profileMap = new Map<string, { full_name: string | null; staff_code: string | null; specific_id: string | null }>();
+    for (const u of users.data ?? []) {
+      const keys = [u.id, u.specific_id, u.staff_code].map((v: any) => String(v ?? "").trim()).filter(Boolean);
+      if (!keys.some((k) => idSet.has(k))) continue;
+      const profile = {
+        full_name: (u.full_name as string | null) ?? null,
+        staff_code: (u.staff_code as string | null) ?? null,
+        specific_id: (u.specific_id as string | null) ?? null,
+      };
+      for (const key of keys) {
+        if (!profileMap.has(key)) profileMap.set(key, profile);
+      }
+    }
+
+    const { data: attendanceRows, error: attendanceErr } = await supabaseAdmin
+      .from("class_attendance_records")
+      .select("student_id, attendance_status, excuse_reason")
+      .eq("class_id", data.classId)
+      .eq("session_date", sessionIso);
+    if (attendanceErr) {
+      const m = String(attendanceErr.message ?? attendanceErr);
+      if (!m.includes("Could not find the table") && !m.includes("does not exist") && !m.includes("42P01")) {
+        throw new Error(attendanceErr.message);
+      }
+    }
+    const attendanceMap = new Map<string, { attendance_status: string | null; excuse_reason: string | null }>(
+      (attendanceRows ?? []).map((r: any) => [
+        String(r.student_id ?? ""),
+        {
+          attendance_status: r.attendance_status ?? null,
+          excuse_reason: r.excuse_reason ?? null,
+        },
+      ]),
+    );
+
+    return studentIds.map((studentId: string) => {
+      const p = profileMap.get(studentId) ?? { full_name: null, staff_code: null, specific_id: studentId };
+      const a = attendanceMap.get(studentId);
+      return {
+        student_id: studentId,
+        full_name: p.full_name,
+        staff_code: p.staff_code ?? p.specific_id,
+        attendance_status: a?.attendance_status ?? null,
+        excuse_reason: a?.excuse_reason ?? null,
+      };
+    });
+  });
+
+export const saveClassSessionAttendance = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        classId: z.string().min(1),
+        sessionDate: z.string().min(1),
+        records: z
+          .array(
+            z.object({
+              studentId: z.string().min(1),
+              attendanceStatus: z.enum(["present", "absent_excused", "absent_unexcused"]),
+              excuseReason: z.string().max(1000).optional(),
+            }),
+          )
+          .default([]),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const me = await getCurrentUserRow(context);
+    const role = normalizeRole(me.role);
+    const isAdmin = role === "admin";
+
+    const { data: classRow, error: classErr } = await supabaseAdmin
+      .from("classes")
+      .select("class_id, teacher_id")
+      .eq("class_id", data.classId)
+      .maybeSingle();
+    if (classErr) throw new Error(classErr.message);
+    if (!classRow) throw new Error("Class not found");
+
+    const toKey = (v: unknown) => String(v ?? "").trim().toLowerCase();
+    const teacherKeys = new Set([toKey(me.id), toKey(me.specific_id), toKey((me as any).staff_code)]);
+    if (!isAdmin && !teacherKeys.has(toKey(classRow.teacher_id))) {
+      throw new Error("Forbidden");
+    }
+
+    const parsedSession = new Date(data.sessionDate);
+    if (Number.isNaN(parsedSession.getTime())) throw new Error("Invalid sessionDate");
+    const sessionIso = parsedSession.toISOString();
+
+    const payload = (data.records ?? []).map((row) => ({
+      class_id: data.classId,
+      session_date: sessionIso,
+      student_id: row.studentId,
+      attendance_status: row.attendanceStatus,
+      excuse_reason: row.excuseReason?.trim() ? row.excuseReason.trim() : null,
+      marked_by: context.userId ?? null,
+      marked_by_specific_id: me.specific_id ?? null,
+      updated_at: new Date().toISOString(),
+    }));
+
+    if (payload.length === 0) return { ok: true, count: 0 };
+
+    const { error } = await supabaseAdmin
+      .from("class_attendance_records")
+      .upsert(payload, { onConflict: "class_id,session_date,student_id" });
+    if (error) throw new Error(error.message);
+
+    return { ok: true, count: payload.length };
+  });
+
+export const getClassSessionGrading = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        classId: z.string().min(1),
+        sessionDate: z.string().min(1),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const me = await getCurrentUserRow(context);
+    const role = normalizeRole(me.role);
+    const isAdmin = role === "admin";
+
+    const { data: classRow, error: classErr } = await supabaseAdmin
+      .from("classes")
+      .select("class_id, teacher_id")
+      .eq("class_id", data.classId)
+      .maybeSingle();
+    if (classErr) throw new Error(classErr.message);
+    if (!classRow) throw new Error("Class not found");
+
+    const toKey = (v: unknown) => String(v ?? "").trim().toLowerCase();
+    const teacherKeys = new Set([toKey(me.id), toKey(me.specific_id), toKey((me as any).staff_code)]);
+    if (!isAdmin && !teacherKeys.has(toKey(classRow.teacher_id))) {
+      throw new Error("Forbidden");
+    }
+
+    const parsedSession = new Date(data.sessionDate);
+    if (Number.isNaN(parsedSession.getTime())) throw new Error("Invalid sessionDate");
+    const sessionIso = parsedSession.toISOString();
+
+    const { data: enrollmentRows, error: enrollmentErr } = await supabaseAdmin
+      .from("class_enrollments")
+      .select("student_id")
+      .eq("class_id", data.classId);
+    if (enrollmentErr) {
+      const m = String(enrollmentErr.message ?? enrollmentErr);
+      if (!m.includes("Could not find the table") && !m.includes("does not exist") && !m.includes("42P01")) {
+        throw new Error(enrollmentErr.message);
+      }
+    }
+    const studentIds = Array.from(
+      new Set((enrollmentRows ?? []).map((r: any) => String(r.student_id ?? "")).filter(Boolean)),
+    ) as string[];
+
+    const users = studentIds.length
+      ? await supabaseAdmin.from("users").select("id, specific_id, staff_code, full_name")
+      : { data: [], error: null };
+    if (users.error) throw new Error(users.error.message);
+
+    const idSet = new Set(studentIds.map((v) => String(v).trim()));
+    const profileMap = new Map<string, { full_name: string | null; staff_code: string | null; specific_id: string | null }>();
+    for (const u of users.data ?? []) {
+      const keys = [u.id, u.specific_id, u.staff_code].map((v: any) => String(v ?? "").trim()).filter(Boolean);
+      if (!keys.some((k) => idSet.has(k))) continue;
+      const profile = {
+        full_name: (u.full_name as string | null) ?? null,
+        staff_code: (u.staff_code as string | null) ?? null,
+        specific_id: (u.specific_id as string | null) ?? null,
+      };
+      for (const key of keys) {
+        if (!profileMap.has(key)) profileMap.set(key, profile);
+      }
+    }
+
+    const { data: gradeRows, error: gradeErr } = await supabaseAdmin
+      .from("class_student_grades")
+      .select("student_id, listening, speaking, reading, writing, vocabulary, grammar, general_comment")
+      .eq("class_id", data.classId)
+      .eq("session_date", sessionIso);
+    if (gradeErr) {
+      const m = String(gradeErr.message ?? gradeErr);
+      if (!m.includes("Could not find the table") && !m.includes("does not exist") && !m.includes("42P01")) {
+        throw new Error(gradeErr.message);
+      }
+    }
+
+    const gradeMap = new Map<string, any>();
+    for (const r of gradeRows ?? []) {
+      gradeMap.set(String((r as any).student_id ?? ""), r);
+    }
+
+    return studentIds.map((studentId: string) => {
+      const p = profileMap.get(studentId) ?? { full_name: null, staff_code: null, specific_id: studentId };
+      const g = gradeMap.get(studentId);
+      return {
+        student_id: studentId,
+        full_name: p.full_name,
+        staff_code: p.staff_code ?? p.specific_id,
+        listening: g?.listening ?? null,
+        speaking: g?.speaking ?? null,
+        reading: g?.reading ?? null,
+        writing: g?.writing ?? null,
+        vocabulary: g?.vocabulary ?? null,
+        grammar: g?.grammar ?? null,
+        general_comment: g?.general_comment ?? null,
+      };
+    });
+  });
+
+export const saveClassSessionGrading = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        classId: z.string().min(1),
+        sessionDate: z.string().min(1),
+        records: z
+          .array(
+            z.object({
+              studentId: z.string().min(1),
+              listening: z.number().int().min(0).max(100),
+              speaking: z.number().int().min(0).max(100),
+              reading: z.number().int().min(0).max(100),
+              writing: z.number().int().min(0).max(100),
+              vocabulary: z.number().int().min(0).max(100),
+              grammar: z.number().int().min(0).max(100),
+              generalComment: z.string().max(2000).optional(),
+            }),
+          )
+          .default([]),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const me = await getCurrentUserRow(context);
+    const role = normalizeRole(me.role);
+    const isAdmin = role === "admin";
+
+    const { data: classRow, error: classErr } = await supabaseAdmin
+      .from("classes")
+      .select("class_id, teacher_id")
+      .eq("class_id", data.classId)
+      .maybeSingle();
+    if (classErr) throw new Error(classErr.message);
+    if (!classRow) throw new Error("Class not found");
+
+    const toKey = (v: unknown) => String(v ?? "").trim().toLowerCase();
+    const teacherKeys = new Set([toKey(me.id), toKey(me.specific_id), toKey((me as any).staff_code)]);
+    if (!isAdmin && !teacherKeys.has(toKey(classRow.teacher_id))) {
+      throw new Error("Forbidden");
+    }
+
+    const parsedSession = new Date(data.sessionDate);
+    if (Number.isNaN(parsedSession.getTime())) throw new Error("Invalid sessionDate");
+    const sessionIso = parsedSession.toISOString();
+
+    const payload = (data.records ?? []).map((row) => ({
+      class_id: data.classId,
+      session_date: sessionIso,
+      student_id: row.studentId,
+      listening: row.listening,
+      speaking: row.speaking,
+      reading: row.reading,
+      writing: row.writing,
+      vocabulary: row.vocabulary,
+      grammar: row.grammar,
+      general_comment: row.generalComment?.trim() ? row.generalComment.trim() : null,
+      graded_by: context.userId ?? null,
+      graded_by_specific_id: me.specific_id ?? null,
+      updated_at: new Date().toISOString(),
+    }));
+
+    if (payload.length === 0) return { ok: true, count: 0 };
+
+    const { error } = await supabaseAdmin
+      .from("class_student_grades")
+      .upsert(payload, { onConflict: "class_id,session_date,student_id" });
+    if (error) throw new Error(error.message);
+
+    return { ok: true, count: payload.length };
   });
 
 
@@ -812,7 +1352,9 @@ export const rateTeacher = createServerFn({ method: "POST" })
   .inputValidator((d) =>
     z
       .object({
-        slotId: z.string().min(1),
+        slotId: z.string().min(1).optional(),
+        classId: z.string().min(1),
+        sessionDate: z.string().min(1),
         teacherId: z.string().min(1),
         stars: z.number().int().min(1).max(5),
         comment: z.string().max(500).optional(),
@@ -821,27 +1363,141 @@ export const rateTeacher = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    const { data: me } = await supabaseAdmin
+    const isMissingTableError = (message: string) =>
+      message.includes("Could not find the table") ||
+      message.includes("does not exist") ||
+      message.includes("42P01");
+
+    const { data: me, error: meErr } = await supabaseAdmin
       .from("users")
-      .select("specific_id")
+      .select("id, specific_id, staff_code")
       .eq("id", userId)
       .maybeSingle();
-    if (!me) throw new Error("User not found");
-    const { data: row, error } = await supabase
-      .from("teacher_ratings")
-      .insert({
-        slot_id: data.slotId,
-        teacher_id: data.teacherId,
-        student_id: me.specific_id,
-        stars: data.stars,
-        comment: data.comment ?? null,
-      })
+    if (meErr) throw new Error(meErr.message);
+    if (!me?.specific_id) throw new Error("User not found");
+
+    const parsedSession = new Date(data.sessionDate);
+    if (Number.isNaN(parsedSession.getTime())) throw new Error("sessionDate không hợp lệ");
+    if (parsedSession.getTime() > Date.now()) throw new Error("Chỉ được đánh giá sau khi buổi học kết thúc");
+    const sessionIso = parsedSession.toISOString();
+
+    const studentKeys = new Set(
+      [String(me.specific_id ?? "").trim(), String(me.id ?? "").trim(), String(me.staff_code ?? "").trim()].filter(
+        Boolean,
+      ),
+    );
+
+    const resolveSpecificId = async (raw: string) => {
+      const v = String(raw ?? "").trim();
+      if (!v) return "";
+
+      const { data: byCode, error: byCodeErr } = await supabaseAdmin
+        .from("users")
+        .select("specific_id")
+        .or(`specific_id.eq.${v},staff_code.eq.${v}`)
+        .limit(1)
+        .maybeSingle();
+      if (byCodeErr) throw new Error(byCodeErr.message);
+      if (byCode?.specific_id) return String(byCode.specific_id).trim();
+
+      const isUuid = (value: string) =>
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+
+      if (!isUuid(v)) return v;
+
+      const { data: byId, error: byIdErr } = await supabaseAdmin
+        .from("users")
+        .select("specific_id")
+        .eq("id", v)
+        .maybeSingle();
+      if (byIdErr) throw new Error(byIdErr.message);
+      return String(byId?.specific_id ?? v).trim();
+    };
+
+    const teacherSpecificId = await resolveSpecificId(data.teacherId);
+
+    const { data: classRow, error: classErr } = await supabaseAdmin
+      .from("classes")
+      .select("class_id, teacher_id")
+      .eq("class_id", data.classId)
+      .maybeSingle();
+    if (classErr) throw new Error(classErr.message);
+    if (!classRow) throw new Error("Không tìm thấy lớp học");
+
+    const classTeacherSpecificId = await resolveSpecificId(String(classRow.teacher_id ?? ""));
+    if (classTeacherSpecificId && classTeacherSpecificId !== teacherSpecificId) {
+      throw new Error("Giáo viên không khớp với lớp học");
+    }
+
+    const enrollmentRows = await supabaseAdmin
+      .from("class_enrollments")
+      .select("student_id")
+      .eq("class_id", data.classId)
+      .limit(2000);
+    if (enrollmentRows.error && !isMissingTableError(String(enrollmentRows.error.message ?? enrollmentRows.error))) {
+      throw new Error(enrollmentRows.error.message);
+    }
+    const hasEnrollment = (enrollmentRows.data ?? []).some((row: any) =>
+      studentKeys.has(String(row?.student_id ?? "").trim()),
+    );
+
+    let validatedByBooking = false;
+    if (!hasEnrollment && data.slotId) {
+      const bookingCheck = await supabaseAdmin
+        .from("bookings")
+        .select("slot_id, student_id, teacher_id, class_id, session_date, status")
+        .eq("slot_id", data.slotId)
+        .maybeSingle();
+      if (bookingCheck.error && !isMissingTableError(String(bookingCheck.error.message ?? bookingCheck.error))) {
+        throw new Error(bookingCheck.error.message);
+      }
+      if (bookingCheck.data) {
+        const bookingTeacherSpecificId = await resolveSpecificId(String(bookingCheck.data.teacher_id ?? ""));
+        const bookingTs = bookingCheck.data.session_date
+          ? new Date(bookingCheck.data.session_date).getTime()
+          : Number.NaN;
+        const sameSession = Number.isFinite(bookingTs)
+          ? bookingTs === parsedSession.getTime()
+          : String(bookingCheck.data.session_date ?? "") === data.sessionDate;
+        validatedByBooking =
+          studentKeys.has(String(bookingCheck.data.student_id ?? "").trim()) &&
+          String(bookingCheck.data.class_id ?? "").trim() === data.classId &&
+          bookingTeacherSpecificId === teacherSpecificId &&
+          sameSession &&
+          ["confirmed", "pending"].includes(String(bookingCheck.data.status ?? ""));
+      }
+    }
+
+    if (!hasEnrollment && !validatedByBooking) {
+      throw new Error("Không tìm thấy quyền đánh giá cho buổi học này");
+    }
+
+    const { data: row, error } = await (supabaseAdmin as any)
+      .from("teacher_session_ratings")
+      .upsert(
+        {
+          slot_id: data.slotId ?? null,
+          class_id: data.classId,
+          session_date: sessionIso,
+          teacher_id: teacherSpecificId,
+          student_id: me.specific_id,
+          stars: data.stars,
+          comment: data.comment?.trim() ? data.comment.trim() : null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "student_id,class_id,session_date" },
+      )
       .select()
       .single();
     if (error) throw new Error(error.message);
     await supabase.rpc("log_action", {
       p_action: "rate_teacher",
-      p_details: { slot_id: data.slotId, stars: data.stars } as any,
+      p_details: {
+        slot_id: data.slotId ?? null,
+        class_id: data.classId,
+        session_date: sessionIso,
+        stars: data.stars,
+      } as any,
     } as any);
     return row;
   });
@@ -849,6 +1505,11 @@ export const rateTeacher = createServerFn({ method: "POST" })
 export const getMyRatings = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
+    const isMissingTableError = (message: string) =>
+      message.includes("Could not find the table") ||
+      message.includes("does not exist") ||
+      message.includes("42P01");
+
     const { data: me, error: meErr } = await supabaseAdmin
       .from("users")
       .select("specific_id")
@@ -857,12 +1518,22 @@ export const getMyRatings = createServerFn({ method: "GET" })
     if (meErr) throw new Error(meErr.message);
     if (!me?.specific_id) return [];
 
-    const { data, error } = await supabaseAdmin
+    const sessionRatings = await supabaseAdmin
+      .from("teacher_session_ratings")
+      .select("slot_id, class_id, session_date, stars, comment, created_at, teacher_id")
+      .eq("student_id", me.specific_id);
+    if (sessionRatings.error && !isMissingTableError(String(sessionRatings.error.message ?? sessionRatings.error))) {
+      throw new Error(sessionRatings.error.message);
+    }
+
+    if (!sessionRatings.error) return sessionRatings.data ?? [];
+
+    const legacyRatings = await supabaseAdmin
       .from("teacher_ratings")
       .select("slot_id, stars, comment, created_at, teacher_id")
       .eq("student_id", me.specific_id);
-    if (error) throw new Error(error.message);
-    return data ?? [];
+    if (legacyRatings.error) throw new Error(legacyRatings.error.message);
+    return legacyRatings.data ?? [];
   });
 
 export const getTeacherAnalytics = createServerFn({ method: "GET" })
@@ -1918,26 +2589,252 @@ export const deleteUserAdmin = createServerFn({ method: "POST" })
 
 // ---------- Teacher: student skill lookup & evaluation ----------
 
+const SKILL_KEYS_ORDER = [
+  "listening",
+  "speaking",
+  "reading",
+  "writing",
+  "vocabulary",
+  "grammar",
+] as const;
+
+async function getMergedStudentSkillsByIdentity(identity: {
+  specificId?: string | null;
+  userId?: string | null;
+  staffCode?: string | null;
+}) {
+  const keys = Array.from(
+    new Set([
+      String(identity.specificId ?? "").trim(),
+      String(identity.userId ?? "").trim(),
+      String(identity.staffCode ?? "").trim(),
+    ].filter(Boolean)),
+  );
+
+  const sumMap = new Map<string, number>();
+  const countMap = new Map<string, number>();
+
+  const add = (skill: string, score: number, n = 1) => {
+    if (!SKILL_KEYS_ORDER.includes(skill as any)) return;
+    if (!Number.isFinite(score) || !Number.isFinite(n) || n <= 0) return;
+    sumMap.set(skill, (sumMap.get(skill) ?? 0) + score * n);
+    countMap.set(skill, (countMap.get(skill) ?? 0) + n);
+  };
+
+  if (identity.specificId) {
+    try {
+      const rpcRes = await supabaseAdmin.rpc("get_student_skills", {
+        p_student_id: identity.specificId,
+      });
+      if (rpcRes.error) {
+        const m = String(rpcRes.error.message ?? rpcRes.error);
+        if (!m.includes("does not exist") && !m.includes("42P01") && !m.includes("Could not find")) {
+          throw new Error(rpcRes.error.message);
+        }
+      } else {
+        for (const row of rpcRes.data ?? []) {
+          add(
+            String((row as any).skill ?? "").toLowerCase(),
+            Number((row as any).avg_score ?? 0),
+            Number((row as any).session_count ?? 0),
+          );
+        }
+      }
+    } catch {
+      // ignore RPC failures; continue with class_student_grades source
+    }
+  }
+
+  if (keys.length > 0) {
+    const isUuid = (v: string) =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+    const uuidKeys = keys.filter(isUuid);
+
+    let gradeRows: any[] = [];
+    const firstTry = await supabaseAdmin
+      .from("class_student_grades")
+      .select("student_id, listening, speaking, reading, writing, vocabulary, grammar")
+      .in("student_id", keys);
+
+    if (firstTry.error) {
+      const m = String(firstTry.error.message ?? firstTry.error);
+      const isUuidCastError = m.includes("invalid input syntax for type uuid");
+      if (isUuidCastError && uuidKeys.length > 0) {
+        const retry = await supabaseAdmin
+          .from("class_student_grades")
+          .select("student_id, listening, speaking, reading, writing, vocabulary, grammar")
+          .in("student_id", uuidKeys);
+        if (retry.error) {
+          const rm = String(retry.error.message ?? retry.error);
+          if (!rm.includes("does not exist") && !rm.includes("42P01") && !rm.includes("Could not find")) {
+            throw new Error(retry.error.message);
+          }
+        } else {
+          gradeRows = retry.data ?? [];
+        }
+      } else if (!m.includes("does not exist") && !m.includes("42P01") && !m.includes("Could not find")) {
+        throw new Error(firstTry.error.message);
+      }
+    } else {
+      gradeRows = firstTry.data ?? [];
+    }
+
+    for (const row of gradeRows) {
+      add("listening", Number((row as any).listening ?? 0));
+      add("speaking", Number((row as any).speaking ?? 0));
+      add("reading", Number((row as any).reading ?? 0));
+      add("writing", Number((row as any).writing ?? 0));
+      add("vocabulary", Number((row as any).vocabulary ?? 0));
+      add("grammar", Number((row as any).grammar ?? 0));
+    }
+  }
+
+  return SKILL_KEYS_ORDER.map((skill) => {
+    const total = sumMap.get(skill) ?? 0;
+    const count = countMap.get(skill) ?? 0;
+    const avg = count > 0 ? Math.round((total / count) * 10) / 10 : 0;
+    return {
+      skill,
+      avg_score: avg,
+      session_count: count,
+    };
+  });
+}
+
 export const getStudentSkillsById = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => z.object({ studentId: z.string().min(1) }).parse(d))
   .handler(async ({ data, context }) => {
-    const { supabase } = context;
-    // Verify student exists
-    const { data: student, error: stuErr } = await supabase
+    const queryValue = String(data.studentId ?? "").trim();
+    const isUuid =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        queryValue,
+      );
+
+    // Verify student exists (ưu tiên staff_code trước để tránh cast UUID)
+    let student: any = null;
+
+    const byStaffCode = await supabaseAdmin
       .from("users")
-      .select("specific_id, full_name, role")
-      .eq("specific_id", data.studentId)
+      .select("id, specific_id, staff_code, full_name, role")
+      .ilike("staff_code", queryValue)
       .eq("role", "student")
       .maybeSingle();
-    if (stuErr) throw new Error(stuErr.message);
+    if (byStaffCode.error) throw new Error(byStaffCode.error.message);
+    student = byStaffCode.data ?? null;
+
+    if (!student) {
+      const bySpecific = await supabaseAdmin
+        .from("users")
+        .select("id, specific_id, staff_code, full_name, role")
+        .eq("specific_id", queryValue)
+        .eq("role", "student")
+        .maybeSingle();
+      if (bySpecific.error) {
+        const m = String(bySpecific.error.message ?? bySpecific.error);
+        const isUuidCastError = m.includes("invalid input syntax for type uuid");
+        if (!isUuidCastError) throw new Error(bySpecific.error.message);
+      } else {
+        student = bySpecific.data ?? null;
+      }
+    }
+
+    if (!student && isUuid) {
+      const byAuthId = await supabaseAdmin
+        .from("users")
+        .select("id, specific_id, staff_code, full_name, role")
+        .eq("id", queryValue)
+        .eq("role", "student")
+        .maybeSingle();
+      if (byAuthId.error) throw new Error(byAuthId.error.message);
+      student = byAuthId.data ?? null;
+    }
+
     if (!student) return null; // not found — caller will show "no student"
 
-    const { data: skills, error } = await supabase.rpc("get_student_skills", {
-      p_student_id: data.studentId,
+    const skills = await getMergedStudentSkillsByIdentity({
+      specificId: student.specific_id,
+      userId: student.id,
+      staffCode: (student as any).staff_code,
     });
-    if (error) throw new Error(error.message);
-    return { student, skills: skills ?? [] };
+
+    const isMissingTableError = (message: string) =>
+      message.includes("Could not find the table") ||
+      message.includes("does not exist") ||
+      message.includes("42P01");
+
+    const [enrollmentsRes, progressRes] = await Promise.all([
+      supabaseAdmin
+        .from("class_enrollments")
+        .select("class_id, classes(class_name, course_id, type)")
+        .eq("student_id", student.specific_id),
+      supabaseAdmin
+        .from("student_progress")
+        .select("course_id, learning_mode, status")
+        .eq("student_id", student.specific_id),
+    ]);
+
+    if (enrollmentsRes.error && !isMissingTableError(String(enrollmentsRes.error.message ?? enrollmentsRes.error))) {
+      throw new Error(enrollmentsRes.error.message);
+    }
+    if (progressRes.error && !isMissingTableError(String(progressRes.error.message ?? progressRes.error))) {
+      throw new Error(progressRes.error.message);
+    }
+
+    const coursesMap = new Map<string, { course_id: string | null; class_id: string | null; class_name: string | null; learning_mode: string | null; status: string | null }>();
+
+    for (const row of enrollmentsRes.data ?? []) {
+      const courseId = (row as any)?.classes?.course_id ?? null;
+      const classId = (row as any)?.class_id ?? null;
+      const className = (row as any)?.classes?.class_name ?? null;
+      const classType = (row as any)?.classes?.type ?? null;
+      const key = `${courseId ?? ""}|${classId ?? ""}`;
+      if (!coursesMap.has(key)) {
+        coursesMap.set(key, {
+          course_id: courseId,
+          class_id: classId,
+          class_name: className,
+          learning_mode:
+            classType === "online_1_1"
+              ? "online"
+              : classType
+                ? "offline"
+                : null,
+          status: null,
+        });
+      }
+    }
+
+    for (const row of progressRes.data ?? []) {
+      const courseId = (row as any)?.course_id ?? null;
+      const key = `${courseId ?? ""}|`;
+      if (!coursesMap.has(key)) {
+        coursesMap.set(key, {
+          course_id: courseId,
+          class_id: null,
+          class_name: null,
+          learning_mode: (row as any)?.learning_mode ?? null,
+          status: (row as any)?.status ?? null,
+        });
+      } else {
+        const current = coursesMap.get(key)!;
+        coursesMap.set(key, {
+          ...current,
+          learning_mode: current.learning_mode ?? (row as any)?.learning_mode ?? null,
+          status: current.status ?? (row as any)?.status ?? null,
+        });
+      }
+    }
+
+    return {
+      student: {
+        specific_id: student.specific_id,
+        staff_code: (student as any).staff_code ?? null,
+        full_name: student.full_name,
+      },
+      skills: skills ?? [],
+      courses: Array.from(coursesMap.values()),
+    };
   });
 
 export const submitEvaluation = createServerFn({ method: "POST" })
@@ -2012,13 +2909,16 @@ export const getStudentSkills = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { data: me, error: meErr } = await supabaseAdmin
       .from("users")
-      .select("specific_id")
+      .select("id, specific_id, staff_code")
       .eq("id", context.userId)
       .maybeSingle();
     if (meErr || !me) throw new Error(meErr?.message ?? "User profile not found");
-    const { data, error } = await context.supabase.rpc("get_student_skills", {
-      p_student_id: me.specific_id,
+
+    const data = await getMergedStudentSkillsByIdentity({
+      specificId: me.specific_id,
+      userId: me.id,
+      staffCode: (me as any).staff_code,
     });
-    if (error) throw new Error(error.message);
+
     return data ?? [];
   });
