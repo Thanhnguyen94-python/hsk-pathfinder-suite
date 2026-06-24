@@ -18,13 +18,15 @@ function createSupabaseClient() {
     // app can render a friendly error or unauthenticated state instead of crashing.
     console.warn(`[Supabase] ${message}`);
 
-    // Minimal stub to satisfy callers that only use `auth` in the client-side
-    // (getSession, onAuthStateChange, signOut). Other features will be unavailable.
+    // Minimal stub to satisfy callers on the client-side when env vars are missing.
+    // Return deterministic errors instead of undefined methods.
+    const buildMissingEnvError = () => new Error(message);
     const stub: any = {
       auth: {
+        signInWithPassword: async () => ({ data: { user: null, session: null }, error: buildMissingEnvError() }),
         getSession: async () => ({ data: { session: null } }),
         onAuthStateChange: (_callback: any) => ({ data: { subscription: { unsubscribe: () => {} } } }),
-        signOut: async () => {},
+        signOut: async () => ({ error: null }),
       },
     };
 
