@@ -32,10 +32,15 @@ dist-ssr
 *.sw?
 # Chặn file chứa các key bí mật của môi trường
 .env
+.env.*
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+
+# Local AI/editor metadata
+.continue/
+.lovable/
 
 # Chặn thư viện bên thứ ba
 node_modules/
