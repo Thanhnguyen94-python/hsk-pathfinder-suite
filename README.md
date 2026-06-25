@@ -33,6 +33,12 @@ npm run dev
 - `npm run test:run`
 - `npm run seed:care`
 
+## Cloudflare auto deploy (quan trọng)
+
+- Dự án dùng npm lockfile để deploy ổn định trên Cloudflare.
+- Luôn commit [package-lock.json](package-lock.json) cùng với [package.json](package.json) khi thay đổi dependency.
+- Không commit `bun.lock` để tránh Cloudflare tự chuyển sang `bun install --frozen-lockfile`.
+
 ## Kiến trúc chính
 
 - Frontend: React + TypeScript + TanStack Router/Query/Start
@@ -146,7 +152,6 @@ hsk_system/
 ├── vite.config.ts                # Vite config (dùng @lovable.dev/vite-tanstack-config)
 ├── vitest.config.ts              # Vitest config
 ├── wrangler.jsonc                # Cloudflare Workers deployment config
-├── bunfig.toml                   # Bun package manager config
 │
 ├── public/                       # Static assets
 │
