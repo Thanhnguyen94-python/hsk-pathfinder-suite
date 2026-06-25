@@ -434,7 +434,7 @@ export function PendingSlotsTable({
   return (
     <section>
       <h2 className="mb-3 font-display text-lg font-semibold">
-        Nhận lớp
+        Nhận lớp ONL
       </h2>
       <div className="rounded-xl border border-border bg-card overflow-hidden">
         <div className="overflow-x-auto">
