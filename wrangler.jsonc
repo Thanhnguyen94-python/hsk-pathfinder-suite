@@ -1,11 +1,25 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "tiengtrungkieukieu",
+  "name": "tiengtrungkieukieu97",
   "compatibility_date": "2025-09-24",
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/server.ts",
   "vars": {
     "SUPABASE_URL": "https://fmcldjrgfbkrthgbyoph.supabase.co",
     "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_CJlt2tKjRddWapjIu47RfA_u0MJZT2l"
+  },
+  "env": {
+    "production": {
+      "vars": {
+        "SUPABASE_URL": "https://fmcldjrgfbkrthgbyoph.supabase.co",
+        "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_CJlt2tKjRddWapjIu47RfA_u0MJZT2l"
+      }
+    },
+    "preview": {
+      "vars": {
+        "SUPABASE_URL": "https://fmcldjrgfbkrthgbyoph.supabase.co",
+        "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_CJlt2tKjRddWapjIu47RfA_u0MJZT2l"
+      }
+    }
   }
 }
