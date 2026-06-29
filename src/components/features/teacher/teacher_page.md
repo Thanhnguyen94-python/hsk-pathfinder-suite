@@ -111,6 +111,44 @@ Hiện bảng đã hiển thị các cột:
 
 ---
 
+## 4.2) Cập nhật UI tab “Lịch dạy của tôi” (29/06/2026)
+
+Đã bổ sung và đồng bộ UI của tab lịch dạy theo phong cách trang Student, chỉ thay đổi phần hiển thị.
+
+### A. Thêm cột “Tài liệu” trong danh sách lịch dạy
+
+- Bảng `MyBookingsTable` đã thêm cột **Tài liệu**.
+- Link tài liệu được resolve theo thứ tự:
+    1. `material_url` của chính row buổi học.
+    2. Nếu row chưa có, lấy theo map tài liệu theo `class_id` (đảm bảo khớp theo mã lớp).
+
+### B. Thêm panel “Lớp của tôi” và lọc theo lớp
+
+- Trong tab **Lịch dạy**, thêm panel **Lớp của tôi**.
+- Giáo viên có thể chọn:
+    - **Tất cả lớp** (mặc định), hoặc
+    - Một lớp cụ thể.
+- Khi chọn lớp, bảng lịch dạy chỉ hiển thị dữ liệu của lớp đó.
+
+### C. Gom panel tìm kiếm + bảng lịch dạy
+
+- Trong `MyBookingsTable`, phần tìm kiếm/bộ lọc và bảng lịch dạy đã được gom vào chung một panel hiển thị thống nhất.
+
+### D. File đã thay đổi
+
+- [src/components/features/teacher/HSK_TeacherDashboardView.tsx](src/components/features/teacher/HSK_TeacherDashboardView.tsx)
+    - Thêm state chọn lớp `selectedClassId`.
+    - Tạo danh sách lớp từ dữ liệu lịch dạy.
+    - Lọc dữ liệu trước khi truyền vào `MyBookingsTable`.
+    - Bổ sung panel **Lớp của tôi** trong tab **Lịch dạy**.
+
+- [src/components/features/teacher/HSK_TeacherDashboardUi.tsx](src/components/features/teacher/HSK_TeacherDashboardUi.tsx)
+    - Thêm cột **Tài liệu**.
+    - Thêm logic map `class_id -> material_url` để fallback theo lớp.
+    - Gom vùng filter/search và bảng vào chung một panel UI.
+
+---
+
 ## 5) Luồng dữ liệu cập nhật dashboard
 
 ```mermaid

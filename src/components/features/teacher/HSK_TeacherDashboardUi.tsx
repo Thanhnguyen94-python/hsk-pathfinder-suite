@@ -934,10 +934,26 @@ export function MyBookingsTable({
     }
   };
 
+  const classMaterialUrlMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const row of myBookings) {
+      const classId = String(row.class_id ?? "").trim();
+      const materialUrl = String((row as any).material_url ?? "").trim();
+      if (!classId || !materialUrl) continue;
+      if (!map.has(classId)) map.set(classId, materialUrl);
+    }
+    return map;
+  }, [myBookings]);
+
+  const getMaterialUrlForBooking = (booking: HSKSlot) => {
+    const ownMaterial = String((booking as any).material_url ?? "").trim();
+    if (ownMaterial) return ownMaterial;
+    const classId = String(booking.class_id ?? "").trim();
+    return classId ? (classMaterialUrlMap.get(classId) ?? "") : "";
+  };
+
   return (
     <section>
-      <h2 className="mb-3 font-display text-lg font-semibold">Lịch dạy của tôi</h2>
-
       {/* Cancel confirm dialog */}
       <TeacherCancelConfirmDialog
         slot={cancelSlot}
@@ -1150,110 +1166,110 @@ export function MyBookingsTable({
         </DialogContent>
       </Dialog>
 
-      <div className="mb-4 space-y-3 rounded-xl border border-border bg-card p-4">
-        <div className="grid gap-3 xl:grid-cols-[1.5fr_auto]">
-          <Input
-            value={searchQuery}
-            onChange={(event) => {
-              setSearchQuery(event.target.value);
-              setPage(1);
-            }}
-            placeholder="Tìm kiếm mã lớp, mã slot, trạng thái..."
-          />
+      <div className="space-y-4 rounded-xl border border-border bg-card p-4">
+        <div className="space-y-3">
+          <div className="grid gap-3 xl:grid-cols-[1.5fr_auto]">
+            <Input
+              value={searchQuery}
+              onChange={(event) => {
+                setSearchQuery(event.target.value);
+                setPage(1);
+              }}
+              placeholder="Tìm kiếm mã lớp, mã slot, trạng thái..."
+            />
 
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            <div className="space-y-1">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Trạng thái</p>
-              <Select
-                value={statusFilter}
-                onValueChange={(value) => {
-                  setStatusFilter(value as any);
-                  setPage(1);
-                }}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Tất cả" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Tất cả</SelectItem>
-                  <SelectItem value="upcoming">Sắp diễn ra</SelectItem>
-                  <SelectItem value="ongoing">Đang diễn ra</SelectItem>
-                  <SelectItem value="completed">Hoàn thành</SelectItem>
-                  <SelectItem value="cancelled">Đã huỷ</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="space-y-1">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Trạng thái</p>
+                <Select
+                  value={statusFilter}
+                  onValueChange={(value) => {
+                    setStatusFilter(value as any);
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Tất cả" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tất cả</SelectItem>
+                    <SelectItem value="upcoming">Sắp diễn ra</SelectItem>
+                    <SelectItem value="ongoing">Đang diễn ra</SelectItem>
+                    <SelectItem value="completed">Hoàn thành</SelectItem>
+                    <SelectItem value="cancelled">Đã huỷ</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-            <div className="space-y-1">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Thời gian</p>
-              <Select
-                value={dateRangeFilter}
-                onValueChange={(value) => {
-                  setDateRangeFilter(value as "all" | "today" | "week" | "month" | "custom");
-                  setPage(1);
-                }}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Tất cả" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Tất cả</SelectItem>
-                  <SelectItem value="today">Hôm nay</SelectItem>
-                  <SelectItem value="week">Tuần này</SelectItem>
-                  <SelectItem value="month">Tháng này</SelectItem>
-                  <SelectItem value="custom">Tuỳ chọn</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+              <div className="space-y-1">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Thời gian</p>
+                <Select
+                  value={dateRangeFilter}
+                  onValueChange={(value) => {
+                    setDateRangeFilter(value as "all" | "today" | "week" | "month" | "custom");
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Tất cả" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tất cả</SelectItem>
+                    <SelectItem value="today">Hôm nay</SelectItem>
+                    <SelectItem value="week">Tuần này</SelectItem>
+                    <SelectItem value="month">Tháng này</SelectItem>
+                    <SelectItem value="custom">Tuỳ chọn</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-            <div className="space-y-1">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Trang</p>
-              <Select
-                value={String(rowsPerPage)}
-                onValueChange={(value) => {
-                  setRowsPerPage(Number(value));
-                  setPage(1);
-                }}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="10" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="10">10</SelectItem>
-                  <SelectItem value="20">20</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="space-y-1">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Trang</p>
+                <Select
+                  value={String(rowsPerPage)}
+                  onValueChange={(value) => {
+                    setRowsPerPage(Number(value));
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="10" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10">10</SelectItem>
+                    <SelectItem value="20">20</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
+
+          {dateRangeFilter === "custom" && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Input
+                type="date"
+                value={customDateFrom}
+                onChange={(event) => {
+                  setCustomDateFrom(event.target.value);
+                  setPage(1);
+                }}
+                placeholder="Từ ngày"
+              />
+              <Input
+                type="date"
+                value={customDateTo}
+                onChange={(event) => {
+                  setCustomDateTo(event.target.value);
+                  setPage(1);
+                }}
+                placeholder="Đến ngày"
+              />
+            </div>
+          )}
         </div>
 
-        {dateRangeFilter === "custom" && (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Input
-              type="date"
-              value={customDateFrom}
-              onChange={(event) => {
-                setCustomDateFrom(event.target.value);
-                setPage(1);
-              }}
-              placeholder="Từ ngày"
-            />
-            <Input
-              type="date"
-              value={customDateTo}
-              onChange={(event) => {
-                setCustomDateTo(event.target.value);
-                setPage(1);
-              }}
-              placeholder="Đến ngày"
-            />
-          </div>
-        )}
-      </div>
-
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
         <div className="overflow-x-auto">
-          <Table className="min-w-[980px]">
+          <Table className="min-w-[1080px]">
             <TableHeader>
               <TableRow>
                 <TableHead className="min-w-[110px] whitespace-nowrap">
@@ -1289,6 +1305,7 @@ export function MyBookingsTable({
                 </TableHead>
                 <TableHead className="min-w-[110px] whitespace-nowrap text-center">Điểm danh</TableHead>
                 <TableHead className="min-w-[110px] whitespace-nowrap text-center">Chấm điểm</TableHead>
+                <TableHead className="min-w-[110px] whitespace-nowrap text-center">Tài liệu</TableHead>
                 <TableHead className="min-w-[80px] whitespace-nowrap text-right">Hành động</TableHead>
               </TableRow>
             </TableHeader>
@@ -1305,6 +1322,7 @@ export function MyBookingsTable({
                   isFuture;
                 const canAttendance = displayStatus === "ongoing" || displayStatus === "completed";
                 const canGrade = displayStatus === "ongoing" || displayStatus === "completed";
+                const materialUrl = getMaterialUrlForBooking(b);
 
                 return (
                   <TableRow key={b.slot_id}>
@@ -1323,6 +1341,20 @@ export function MyBookingsTable({
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-center">
                       <Checkbox checked={Boolean((b as any).grading_done)} disabled />
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-center">
+                      {materialUrl ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-xs"
+                          onClick={() => window.open(materialUrl, "_blank")}
+                        >
+                          Tài liệu
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-right">
                       <DropdownMenu>
@@ -1367,7 +1399,7 @@ export function MyBookingsTable({
               })}
               {paginatedBookings.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
                     Không tìm thấy lịch dạy nào phù hợp
                   </TableCell>
                 </TableRow>

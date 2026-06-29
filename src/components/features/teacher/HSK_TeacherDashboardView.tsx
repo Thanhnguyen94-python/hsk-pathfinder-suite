@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   useHSKTeacherBookingViewModel,
   useTeacherStudentLookup,
@@ -42,6 +42,54 @@ export function HSK_TeacherDashboardView() {
   } = useTeacherStudentLookup();
 
   const [activeTab, setActiveTab] = useState("pending-slots");
+  const [selectedClassId, setSelectedClassId] = useState<string>("all");
+
+  const teacherClasses = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        classId: string;
+        className: string;
+        totalSessions: number;
+        nextSessionDate?: string | null;
+      }
+    >();
+
+    for (const row of myBookings) {
+      const classId = String(row.class_id ?? "").trim();
+      if (!classId) continue;
+
+      const existing = map.get(classId);
+      const rowSessionTs = new Date(String(row.session_date ?? "")).getTime();
+
+      if (!existing) {
+        map.set(classId, {
+          classId,
+          className: String((row as any).course_name ?? classId),
+          totalSessions: 1,
+          nextSessionDate: row.session_date,
+        });
+        continue;
+      }
+
+      const existingTs = existing.nextSessionDate
+        ? new Date(existing.nextSessionDate).getTime()
+        : Number.POSITIVE_INFINITY;
+
+      existing.totalSessions += 1;
+      if (Number.isFinite(rowSessionTs) && rowSessionTs < existingTs) {
+        existing.nextSessionDate = row.session_date;
+      }
+      map.set(classId, existing);
+    }
+
+    return Array.from(map.values()).sort((a, b) => a.classId.localeCompare(b.classId));
+  }, [myBookings]);
+
+  const myBookingsForSelectedClass = useMemo(() => {
+    if (selectedClassId === "all") return myBookings;
+    return myBookings.filter((row) => String(row.class_id ?? "") === selectedClassId);
+  }, [myBookings, selectedClassId]);
 
   return (
     <div className="space-y-8">
@@ -70,7 +118,7 @@ export function HSK_TeacherDashboardView() {
           <TabsTrigger value="my-bookings">Lịch dạy</TabsTrigger>
           <TabsTrigger value="lookup">Tra cứu</TabsTrigger>
           <TabsTrigger value="leave">Xin nghỉ</TabsTrigger>
-          <TabsTrigger value="penalties">Vi phạm</TabsTrigger>
+          <TabsTrigger value="penalties">Chuyên cần</TabsTrigger>
           <TabsTrigger value="notices">Thông báo</TabsTrigger>
         </TabsList>
         <TabsContent value="pending-slots" className="mt-6">
@@ -81,21 +129,89 @@ export function HSK_TeacherDashboardView() {
           />
         </TabsContent>
         <TabsContent value="my-bookings" className="mt-6">
-          <MyBookingsTable
-            myBookings={myBookings}
-            onCancel={cancelBooking}
-            cancelPending={cancelState.isPending}
-            onLoadAttendance={getSessionAttendance as any}
-            onSaveAttendance={saveSessionAttendance as any}
-            attendanceSaving={attendanceState.isPending}
-            attendanceSaveError={attendanceState.error as Error | null}
-            attendanceSaveSuccess={attendanceState.isSuccess}
-            onLoadGrading={getSessionGrading as any}
-            onSaveGrading={saveSessionGrading as any}
-            gradingSaving={gradingState.isPending}
-            gradingSaveError={gradingState.error as Error | null}
-            gradingSaveSuccess={gradingState.isSuccess}
-          />
+          <div className="space-y-6">
+            <section className="space-y-3 rounded-xl border border-border bg-card p-5">
+              <h2 className="font-display text-lg font-semibold">Lớp của tôi</h2>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedClassId("all")}
+                  className={`rounded-full border px-3 py-1 text-sm transition ${
+                    selectedClassId === "all"
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border bg-background text-foreground"
+                  }`}
+                >
+                  Tất cả lớp
+                </button>
+                {teacherClasses.map((item) => (
+                  <button
+                    key={item.classId}
+                    type="button"
+                    onClick={() => setSelectedClassId(item.classId)}
+                    className={`rounded-full border px-3 py-1 text-sm transition ${
+                      selectedClassId === item.classId
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border bg-background text-foreground"
+                    }`}
+                  >
+                    {item.className}
+                  </button>
+                ))}
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                {teacherClasses.map((item) => {
+                  const isSelected = selectedClassId === "all" || selectedClassId === item.classId;
+                  return (
+                    <button
+                      key={item.classId}
+                      type="button"
+                      onClick={() => setSelectedClassId(item.classId)}
+                      className={`rounded-lg border bg-background p-4 text-left transition ${
+                        isSelected ? "border-primary/50 shadow-sm" : "border-border"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-semibold">{item.className}</div>
+                          <div className="font-mono text-xs text-muted-foreground">{item.classId}</div>
+                        </div>
+                        <Badge variant="outline">{item.totalSessions} buổi</Badge>
+                      </div>
+                      <div className="mt-3 text-sm text-muted-foreground">
+                        Buổi gần nhất: <span className="text-foreground">{item.nextSessionDate ? new Date(item.nextSessionDate).toLocaleString("vi-VN") : "—"}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+                {teacherClasses.length === 0 && (
+                  <p className="text-sm text-muted-foreground">Bạn chưa có lớp dạy nào.</p>
+                )}
+              </div>
+            </section>
+
+            <section className="space-y-3 rounded-xl border border-border bg-card p-5">
+              <h2 className="font-display text-lg font-semibold">
+                Lịch dạy của tôi {selectedClassId !== "all" ? `· ${selectedClassId}` : ""}
+              </h2>
+              <MyBookingsTable
+                myBookings={myBookingsForSelectedClass}
+                onCancel={cancelBooking}
+                cancelPending={cancelState.isPending}
+                onLoadAttendance={getSessionAttendance as any}
+                onSaveAttendance={saveSessionAttendance as any}
+                attendanceSaving={attendanceState.isPending}
+                attendanceSaveError={attendanceState.error as Error | null}
+                attendanceSaveSuccess={attendanceState.isSuccess}
+                onLoadGrading={getSessionGrading as any}
+                onSaveGrading={saveSessionGrading as any}
+                gradingSaving={gradingState.isPending}
+                gradingSaveError={gradingState.error as Error | null}
+                gradingSaveSuccess={gradingState.isSuccess}
+              />
+            </section>
+          </div>
         </TabsContent>
         <TabsContent value="lookup" className="mt-6">
           <StudentLookupPanel
