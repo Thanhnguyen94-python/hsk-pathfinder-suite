@@ -77,3 +77,39 @@ sequenceDiagram
     VM-->>View: Query Invalidation / Kích hoạt Re-render
     View-->>UI: Cập nhật giao diện màn hình
 ```
+
+---
+
+## 5. Cập nhật UI Student Page (29/06/2026)
+
+Đã cập nhật lại **cách hiển thị giao diện** trang học viên theo dạng tab, không thay đổi các logic nghiệp vụ (booking, filter, tìm kiếm, submit bài tập, huỷ lịch, đánh giá...).
+
+### Cấu trúc tab mới
+
+1. **Kỹ năng**
+    * Chứa nguyên panel radar chart kỹ năng hiện tại.
+
+2. **Booking**
+    * Dành cho học viên tài khoản `online` đặt lịch 1-1 với giáo viên.
+    * Giữ nguyên các thành phần cũ: `ProgressCards`, nút `HSK_BookingDialog`, điều kiện hiển thị theo account mode.
+
+3. **Lớp học**
+    * Chứa panel danh sách lớp học của học viên.
+    * Bổ sung cơ chế chọn lớp trực tiếp trên UI:
+      * Mặc định hiển thị **Tất cả lớp**.
+      * Khi bấm vào một lớp cụ thể, bảng **Danh sách lịch học** chỉ hiển thị lịch của lớp đó.
+    * Thành phần `BookingsTable` vẫn giữ nguyên toàn bộ logic bên trong (search/filter/sort/pagination/hành động).
+
+4. **Bài tập**
+    * Chứa bảng bài tập về nhà (`AssignmentsTable`) như hiện tại.
+
+5. **Thông báo**
+    * Chứa danh sách thông báo hiển thị cho học viên.
+
+### File đã thay đổi
+
+* [src/components/features/student/HSK_StudentDashboardView.tsx](src/components/features/student/HSK_StudentDashboardView.tsx)
+  * Tổ chức lại toàn bộ layout hiển thị thành 5 tab.
+  * Thêm state lọc lớp (`selectedClassId`) cho tab Lớp học.
+  * Áp dụng lọc dữ liệu `bookingsForTable` theo lớp trước khi truyền vào `BookingsTable`.
+

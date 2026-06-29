@@ -163,12 +163,6 @@ type GradingStudentRow = {
 };
 
 interface StudentLookupPanelProps {
-  teacherProfile?: {
-    full_name?: string | null;
-    staff_code?: string | null;
-    avg_stars?: number;
-    total_reviews?: number;
-  } | null;
   /** Slots xác nhận thuộc giáo viên này để validate */
   myConfirmedSlots: HSKSlot[];
   onLookup: (studentId: string) => void;
@@ -192,7 +186,6 @@ interface StudentLookupPanelProps {
 }
 
 export function StudentLookupPanel({
-  teacherProfile,
   myConfirmedSlots,
   onLookup,
   lookupResult,
@@ -242,20 +235,6 @@ export function StudentLookupPanel({
 
   return (
     <section className="rounded-xl border border-border bg-card p-5">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2">
-        <div>
-          <p className="text-sm font-semibold">
-            Xin chào, {teacherProfile?.full_name ?? "Giáo viên"}
-          </p>
-          <p className="text-xs text-muted-foreground font-mono">
-            {teacherProfile?.staff_code ?? "—"}
-          </p>
-        </div>
-        <Badge variant="outline" className="text-xs">
-          ⭐ {(teacherProfile?.avg_stars ?? 0).toFixed(1)} ({teacherProfile?.total_reviews ?? 0} đánh giá)
-        </Badge>
-      </div>
-
       <h2 className="mb-4 font-display text-base font-semibold flex items-center gap-2">
         <UserSearch className="h-4 w-4 text-primary" />
         Tra cứu kỹ năng học viên
@@ -265,7 +244,7 @@ export function StudentLookupPanel({
       <div className="flex gap-2 mb-4">
         <Input
           id="teacher-student-search"
-          placeholder="Nhập mã học viên/staff_code (vd: ST-0001)"
+          placeholder="Nhập mã học viên"
           value={query}
           onChange={(e) => { setQuery(e.target.value); }}
           onKeyDown={(e) => e.key === "Enter" && handleSearch()}
@@ -970,7 +949,7 @@ export function MyBookingsTable({
       <Dialog open={attendanceDialogOpen} onOpenChange={setAttendanceDialogOpen}>
         <DialogContent className="max-w-3xl" id="attendance-modal">
           <DialogHeader>
-            <DialogTitle>Điểm danh học viên</DialogTitle>
+            <DialogTitle>Điểm danh</DialogTitle>
             <DialogDescription>
               Lớp {attendanceSlot?.class_id ?? "—"} — {attendanceSlot ? new Date(attendanceSlot.session_date).toLocaleString("vi-VN") : "—"}
             </DialogDescription>
@@ -990,7 +969,7 @@ export function MyBookingsTable({
                     <TableHead>Tên học viên</TableHead>
                     <TableHead>Mã học viên</TableHead>
                     <TableHead>Điểm danh</TableHead>
-                    <TableHead>Lý do (có phép/không phép)</TableHead>
+                    <TableHead>Lý do</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1069,7 +1048,7 @@ export function MyBookingsTable({
       <Dialog open={gradeDialogOpen} onOpenChange={setGradeDialogOpen}>
         <DialogContent className="w-[95vw] max-w-[95vw] xl:max-w-6xl max-h-[88vh] overflow-hidden" id="grade-modal">
           <DialogHeader>
-            <DialogTitle>Chấm điểm học viên</DialogTitle>
+            <DialogTitle>Chấm điểm</DialogTitle>
             <DialogDescription>
               Lớp {gradeSlot?.class_id ?? "—"} — {gradeSlot ? new Date(gradeSlot.session_date).toLocaleString("vi-VN") : "—"}
             </DialogDescription>
@@ -1206,7 +1185,7 @@ export function MyBookingsTable({
             </div>
 
             <div className="space-y-1">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Khoảng thời gian</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Thời gian</p>
               <Select
                 value={dateRangeFilter}
                 onValueChange={(value) => {
@@ -1228,7 +1207,7 @@ export function MyBookingsTable({
             </div>
 
             <div className="space-y-1">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Dòng / trang</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Trang</p>
               <Select
                 value={String(rowsPerPage)}
                 onValueChange={(value) => {
@@ -1370,7 +1349,7 @@ export function MyBookingsTable({
                             onClick={() => openAttendanceDialog(b)}
                           >
                             <ClipboardCheck className="h-4 w-4" />
-                            Điểm danh học viên
+                            Điểm danh
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             id={`action-grade-${b.slot_id}`}
@@ -1378,7 +1357,7 @@ export function MyBookingsTable({
                             onClick={() => openGradeDialog(b)}
                           >
                             <ClipboardPen className="h-4 w-4" />
-                            Chấm điểm học viên
+                            Chấm điểm
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>

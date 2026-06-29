@@ -1,6 +1,5 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useHSKStudentBookingViewModel } from "@/hooks/hsk-viewmodels/HSK_useBookingViewModel";
-import { RatingDialog } from "@/components/common/RatingDialog";
 import { HSK_BookingDialog } from "@/components/common/HSK_BookingDialog";
 import {
   Radar,
@@ -17,6 +16,7 @@ import {
 } from "./HSK_StudentDashboardUi";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { notices } from "@/data/mock";
 import type { HSKSlot } from "@/types/hsk-models/hsk-booking.types";
 
 const skillSampleData = [
@@ -38,6 +38,8 @@ const SKILL_LABELS: Record<string, string> = {
 };
 
 export function HSK_StudentDashboardView() {
+  const [selectedClassId, setSelectedClassId] = useState<string>("all");
+
   const {
     me,
     progress,
@@ -180,6 +182,35 @@ export function HSK_StudentDashboardView() {
     return [];
   }, [bookings, enrollments, accountMode, sessionNotes]);
 
+  const classFilters = useMemo(() => {
+    const map = new Map<string, { classId: string; className: string }>();
+
+    for (const item of enrollments ?? []) {
+      const classId = String(item?.class_id ?? "").trim();
+      if (!classId) continue;
+      map.set(classId, {
+        classId,
+        className: String(item?.class_name ?? classId),
+      });
+    }
+
+    for (const row of bookingsForTable ?? []) {
+      const classId = String(row?.class_id ?? "").trim();
+      if (!classId || map.has(classId)) continue;
+      map.set(classId, {
+        classId,
+        className: String(row?.course_name ?? classId),
+      });
+    }
+
+    return Array.from(map.values());
+  }, [enrollments, bookingsForTable]);
+
+  const classScopedBookings = useMemo(() => {
+    if (selectedClassId === "all") return bookingsForTable;
+    return bookingsForTable.filter((row) => String(row.class_id ?? "") === selectedClassId);
+  }, [bookingsForTable, selectedClassId]);
+
   return (
     <div className="space-y-8">
       <section className="flex flex-wrap items-end justify-between gap-3">
@@ -201,148 +232,218 @@ export function HSK_StudentDashboardView() {
           </div>
         </div>
       </section>
-      <div className="rounded-xl border border-border bg-card p-5">
-        <h2 className="mb-3 font-display text-lg font-semibold">Kỹ năng hiện tại</h2>
-        <div className="h-80 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <RadarChart cx="50%" cy="50%" outerRadius="80%" data={radarData}>
-              <PolarGrid />
-              <PolarAngleAxis dataKey="skill" tick={{ fill: "hsl(var(--foreground))", fontSize: 12 }} />
-              <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: "hsl(var(--muted-foreground))" }} />
-              <Radar
-                name="Học viên"
-                dataKey="score"
-                stroke="hsl(var(--primary))"
-                fill="hsl(var(--primary))"
-                fillOpacity={0.3}
-              />
-            </RadarChart>
-          </ResponsiveContainer>
-        </div>
-        <p className="mt-2 text-center text-xs text-muted-foreground">*Điểm đánh giá nội bộ, sẽ cập nhật theo tiến độ thực tế</p>
-      </div>
+      <Tabs defaultValue="skills" className="space-y-6">
+        <TabsList className="grid h-auto w-full grid-cols-2 gap-2 md:grid-cols-5">
+          <TabsTrigger value="skills">Kỹ năng</TabsTrigger>
+          <TabsTrigger value="booking">Booking</TabsTrigger>
+          <TabsTrigger value="classes">Lớp học</TabsTrigger>
+          <TabsTrigger value="assignments">Bài tập</TabsTrigger>
+          <TabsTrigger value="notices">Thông báo</TabsTrigger>
+        </TabsList>
 
-      {accountMode ? (
-        <div className="space-y-8">
-          {accountMode === "online" ? (
-            <>
-              <ProgressCards
-                items={onlineCourses}
-                onFreeze={(v) => freezeCourse(v)}
-                onUnfreeze={(v) => unfreezeCourse(v)}
-              />
-              <section>
-                <div className="mb-3 flex items-center justify-between">
-                  <h2 className="font-display text-lg font-semibold">Đặt lịch 1-1 với giáo viên</h2>
-                  <HSK_BookingDialog courses={onlineCourses} />
-                </div>
-                {onlineCourses.length === 0 && (
-                  <p className="text-sm text-muted-foreground">Bạn chưa đăng ký khoá Online nào.</p>
-                )}
-              </section>
-            </>
-          ) : (
-            <>
-              <ProgressCards
-                items={offlineCourses}
-                onFreeze={(v) => freezeCourse(v)}
-                onUnfreeze={(v) => unfreezeCourse(v)}
-              />
-              <section>
-                <h2 className="mb-3 font-display text-lg font-semibold">Lịch lớp cố định</h2>
-                <div className="rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground">
-                  Lớp Offline do <span className="font-medium text-foreground">Admin</span> sắp xếp và gán lịch. Bạn không thể tự đặt lịch — vui lòng liên hệ phòng CSKH nếu cần thay đổi.
-                </div>
-              </section>
-            </>
-          )}
-        </div>
-      ) : (
-        <Tabs defaultValue={defaultMode}>
-          <TabsList>
-            <TabsTrigger value="online" disabled={!hasOnline && hasOffline}>
-              Online (1-1)
-            </TabsTrigger>
-            <TabsTrigger value="offline" disabled={!hasOffline && hasOnline}>
-              Offline (Lớp cố định)
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="online" className="mt-6 space-y-8">
-            <ProgressCards
-              items={onlineCourses}
-              onFreeze={(v) => freezeCourse(v)}
-              onUnfreeze={(v) => unfreezeCourse(v)}
-            />
-            <section>
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="font-display text-lg font-semibold">Đặt lịch 1-1 với giáo viên</h2>
-                <HSK_BookingDialog courses={onlineCourses} />
-              </div>
-              {onlineCourses.length === 0 && (
-                <p className="text-sm text-muted-foreground">Bạn chưa đăng ký khoá Online nào.</p>
-              )}
-            </section>
-          </TabsContent>
-
-          <TabsContent value="offline" className="mt-6 space-y-8">
-            <ProgressCards
-              items={offlineCourses}
-              onFreeze={(v) => freezeCourse(v)}
-              onUnfreeze={(v) => unfreezeCourse(v)}
-            />
-            <section>
-              <h2 className="mb-3 font-display text-lg font-semibold">Lịch lớp cố định</h2>
-              <div className="rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground">
-                Lớp Offline do <span className="font-medium text-foreground">Admin</span> sắp xếp và gán lịch. Bạn không thể tự đặt lịch — vui lòng liên hệ phòng CSKH nếu cần thay đổi.
-              </div>
-            </section>
-          </TabsContent>
-        </Tabs>
-      )}
-
-      <section className="space-y-3 rounded-xl border border-border bg-card p-5">
-        <h2 className="font-display text-lg font-semibold">Danh sách lịch học</h2>
-        <BookingsTable
-          bookings={bookingsForTable}
-          ratedSlots={ratedSlots}
-          onCancel={(id) => cancelSlot(id)}
-        />
-      </section>
-
-      <section className="space-y-3 rounded-xl border border-border bg-card p-5">
-        <h2 className="font-display text-lg font-semibold">Lớp học của tôi</h2>
-        <div className="grid gap-3 md:grid-cols-2">
-          {enrollments.map((item: any) => (
-            <div key={item.class_id} className="rounded-lg border border-border bg-background p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="font-semibold">{item.class_name ?? item.class_id}</div>
-                  <div className="text-xs text-muted-foreground">{item.course_id ?? "—"}</div>
-                </div>
-                <Badge variant={item.class_type === "online_1_1" ? "default" : "secondary"}>
-                  {item.class_type === "online_1_1" ? "Online" : "Offline"}
-                </Badge>
-              </div>
-              <div className="mt-3 text-sm text-muted-foreground">
-                <div>Mã lớp: <span className="font-mono text-foreground">{item.class_id}</span></div>
-                <div>Ngày bắt đầu: <span className="text-foreground">{item.start_date ?? "—"}</span></div>
-                <div>Ngày kết thúc: <span className="text-foreground">{item.end_date ?? "—"}</span></div>
-                <div>Giờ học: <span className="text-foreground">{item.start_time ?? "—"} - {item.end_time ?? "—"}</span></div>
-              </div>
+        <TabsContent value="skills" className="space-y-6">
+          <div className="rounded-xl border border-border bg-card p-5">
+            <h2 className="mb-3 font-display text-lg font-semibold">Kỹ năng hiện tại</h2>
+            <div className="h-80 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <RadarChart cx="50%" cy="50%" outerRadius="80%" data={radarData}>
+                  <PolarGrid />
+                  <PolarAngleAxis dataKey="skill" tick={{ fill: "hsl(var(--foreground))", fontSize: 12 }} />
+                  <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: "hsl(var(--muted-foreground))" }} />
+                  <Radar
+                    name="Học viên"
+                    dataKey="score"
+                    stroke="hsl(var(--primary))"
+                    fill="hsl(var(--primary))"
+                    fillOpacity={0.3}
+                  />
+                </RadarChart>
+              </ResponsiveContainer>
             </div>
-          ))}
-          {enrollments.length === 0 && (
-            <p className="text-sm text-muted-foreground">Học viên hiện chưa có lớp học được gán trong CSDL.</p>
-          )}
-        </div>
-      </section>
+            <p className="mt-2 text-center text-xs text-muted-foreground">*Điểm đánh giá nội bộ, sẽ cập nhật theo tiến độ thực tế</p>
+          </div>
+        </TabsContent>
 
-      <AssignmentsTable
-        assignments={assignments}
-        submissions={submissions}
-        onSubmit={(assignmentId, text) => submitAssignment({ assignmentId, text })}
-      />
+        <TabsContent value="booking" className="space-y-6">
+          {accountMode ? (
+            <div className="space-y-6">
+              {accountMode === "online" ? (
+                <>
+                  <ProgressCards
+                    items={onlineCourses}
+                    onFreeze={(v) => freezeCourse(v)}
+                    onUnfreeze={(v) => unfreezeCourse(v)}
+                  />
+                  <section className="rounded-xl border border-border bg-card p-5">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <h2 className="font-display text-lg font-semibold">Đặt lịch 1-1 với giáo viên</h2>
+                      <HSK_BookingDialog courses={onlineCourses} />
+                    </div>
+                    {onlineCourses.length === 0 && (
+                      <p className="text-sm text-muted-foreground">Bạn chưa đăng ký khoá Online nào.</p>
+                    )}
+                  </section>
+                </>
+              ) : (
+                <>
+                  <ProgressCards
+                    items={offlineCourses}
+                    onFreeze={(v) => freezeCourse(v)}
+                    onUnfreeze={(v) => unfreezeCourse(v)}
+                  />
+                  <section className="rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground">
+                    Lớp Offline do <span className="font-medium text-foreground">Admin</span> sắp xếp và gán lịch. Bạn không thể tự đặt lịch — vui lòng liên hệ phòng CSKH nếu cần thay đổi.
+                  </section>
+                </>
+              )}
+            </div>
+          ) : (
+            <Tabs defaultValue={defaultMode}>
+              <TabsList>
+                <TabsTrigger value="online" disabled={!hasOnline && hasOffline}>
+                  Online (1-1)
+                </TabsTrigger>
+                <TabsTrigger value="offline" disabled={!hasOffline && hasOnline}>
+                  Offline (Lớp cố định)
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="online" className="mt-6 space-y-6">
+                <ProgressCards
+                  items={onlineCourses}
+                  onFreeze={(v) => freezeCourse(v)}
+                  onUnfreeze={(v) => unfreezeCourse(v)}
+                />
+                <section className="rounded-xl border border-border bg-card p-5">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <h2 className="font-display text-lg font-semibold">Đặt lịch 1-1 với giáo viên</h2>
+                    <HSK_BookingDialog courses={onlineCourses} />
+                  </div>
+                  {onlineCourses.length === 0 && (
+                    <p className="text-sm text-muted-foreground">Bạn chưa đăng ký khoá Online nào.</p>
+                  )}
+                </section>
+              </TabsContent>
+
+              <TabsContent value="offline" className="mt-6 space-y-6">
+                <ProgressCards
+                  items={offlineCourses}
+                  onFreeze={(v) => freezeCourse(v)}
+                  onUnfreeze={(v) => unfreezeCourse(v)}
+                />
+                <section className="rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground">
+                  Lớp Offline do <span className="font-medium text-foreground">Admin</span> sắp xếp và gán lịch. Bạn không thể tự đặt lịch — vui lòng liên hệ phòng CSKH nếu cần thay đổi.
+                </section>
+              </TabsContent>
+            </Tabs>
+          )}
+        </TabsContent>
+
+        <TabsContent value="classes" className="space-y-6">
+          <section className="space-y-3 rounded-xl border border-border bg-card p-5">
+            <h2 className="font-display text-lg font-semibold">Lớp học của tôi</h2>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedClassId("all")}
+                className={`rounded-full border px-3 py-1 text-sm transition ${
+                  selectedClassId === "all"
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border bg-background text-foreground"
+                }`}
+              >
+                Tất cả lớp
+              </button>
+              {classFilters.map((item) => (
+                <button
+                  key={item.classId}
+                  type="button"
+                  onClick={() => setSelectedClassId(item.classId)}
+                  className={`rounded-full border px-3 py-1 text-sm transition ${
+                    selectedClassId === item.classId
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border bg-background text-foreground"
+                  }`}
+                >
+                  {item.className}
+                </button>
+              ))}
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              {enrollments.map((item: any) => {
+                const isSelected = selectedClassId === "all" || selectedClassId === String(item.class_id ?? "");
+                return (
+                  <button
+                    key={item.class_id}
+                    type="button"
+                    onClick={() => setSelectedClassId(String(item.class_id ?? "all"))}
+                    className={`rounded-lg border bg-background p-4 text-left transition ${
+                      isSelected ? "border-primary/50 shadow-sm" : "border-border"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="font-semibold">{item.class_name ?? item.class_id}</div>
+                        <div className="text-xs text-muted-foreground">{item.course_id ?? "—"}</div>
+                      </div>
+                      <Badge variant={item.class_type === "online_1_1" ? "default" : "secondary"}>
+                        {item.class_type === "online_1_1" ? "Online" : "Offline"}
+                      </Badge>
+                    </div>
+                    <div className="mt-3 text-sm text-muted-foreground">
+                      <div>Mã lớp: <span className="font-mono text-foreground">{item.class_id}</span></div>
+                      <div>Ngày bắt đầu: <span className="text-foreground">{item.start_date ?? "—"}</span></div>
+                      <div>Ngày kết thúc: <span className="text-foreground">{item.end_date ?? "—"}</span></div>
+                      <div>Giờ học: <span className="text-foreground">{item.start_time ?? "—"} - {item.end_time ?? "—"}</span></div>
+                    </div>
+                  </button>
+                );
+              })}
+              {enrollments.length === 0 && (
+                <p className="text-sm text-muted-foreground">Học viên hiện chưa có lớp học được gán trong CSDL.</p>
+              )}
+            </div>
+          </section>
+
+          <section className="space-y-3 rounded-xl border border-border bg-card p-5">
+            <h2 className="font-display text-lg font-semibold">
+              Danh sách lịch học {selectedClassId !== "all" ? `· ${selectedClassId}` : ""}
+            </h2>
+            <BookingsTable
+              bookings={classScopedBookings}
+              ratedSlots={ratedSlots}
+              onCancel={(id) => cancelSlot(id)}
+            />
+          </section>
+        </TabsContent>
+
+        <TabsContent value="assignments" className="space-y-6">
+          <AssignmentsTable
+            assignments={assignments}
+            submissions={submissions}
+            onSubmit={(assignmentId, text) => submitAssignment({ assignmentId, text })}
+          />
+        </TabsContent>
+
+        <TabsContent value="notices" className="space-y-6">
+          <section className="space-y-3 rounded-xl border border-border bg-card p-5">
+            <h2 className="font-display text-lg font-semibold">Thông báo</h2>
+            <div className="space-y-3">
+              {notices.map((n) => (
+                <article key={n.id} className="rounded-lg border border-border bg-background p-4">
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
+                    <Badge variant="outline">{n.tag}</Badge>
+                    <span className="text-xs text-muted-foreground">{n.date}</span>
+                  </div>
+                  <h3 className="font-medium">{n.title}</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">{n.body}</p>
+                </article>
+              ))}
+            </div>
+          </section>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

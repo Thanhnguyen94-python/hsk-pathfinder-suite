@@ -66,6 +66,51 @@ Hiện bảng đã hiển thị các cột:
 
 ---
 
+## 4.1) Cập nhật UI Teacher Page (29/06/2026)
+
+Đã cập nhật lại **cách hiển thị giao diện** trang Giáo viên theo yêu cầu, không thay đổi logic nghiệp vụ hiện tại.
+
+### A. Đưa panel “Xin chào, giáo viên …” ra ngoài
+
+- Header chào giáo viên được đưa ra ngoài, đặt ở đầu trang (tương tự trang Student):
+    - Tên giáo viên
+    - Mã giáo viên
+    - Điểm đánh giá trung bình và tổng số lượt đánh giá
+- Đồng thời loại bỏ phần header trùng lặp bên trong panel Tra cứu để tránh lặp UI.
+
+### B. Cấu trúc tab mới
+
+Đã đổi thành các tab:
+
+1. **Nhận lớp**
+2. **Lịch dạy**
+3. **Tra cứu** (rút gọn từ “Tra cứu kỹ năng học viên”)
+4. **Xin nghỉ**
+5. **Vi phạm**
+6. **Thông báo**
+
+### C. Mapping nội dung theo tab
+
+- **Nhận lớp**: giữ nguyên `PendingSlotsTable`.
+- **Lịch dạy**: giữ nguyên `MyBookingsTable` (filter/search/sort/phân trang/hành động vẫn giữ nguyên).
+- **Tra cứu**: chứa `StudentLookupPanel` (tra cứu + radar kỹ năng + đánh giá).
+- **Xin nghỉ**: tạo panel UI riêng cho khu vực xin nghỉ (chỉ thay đổi hiển thị).
+- **Vi phạm**: giữ nguyên `PenaltiesTable`.
+- **Thông báo**: hiển thị danh sách thông báo theo UI card.
+
+### D. File đã thay đổi
+
+- [src/components/features/teacher/HSK_TeacherDashboardView.tsx](src/components/features/teacher/HSK_TeacherDashboardView.tsx)
+    - Tổ chức lại layout theo tab mới.
+    - Thêm header chào giáo viên ở đầu trang.
+    - Chuyển `StudentLookupPanel` vào tab **Tra cứu**.
+    - Bổ sung tab **Xin nghỉ** và **Thông báo**.
+
+- [src/components/features/teacher/HSK_TeacherDashboardUi.tsx](src/components/features/teacher/HSK_TeacherDashboardUi.tsx)
+    - Bỏ block chào giáo viên trong `StudentLookupPanel` để tránh trùng với header ngoài.
+
+---
+
 ## 5) Luồng dữ liệu cập nhật dashboard
 
 ```mermaid

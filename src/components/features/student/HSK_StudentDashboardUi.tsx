@@ -551,7 +551,7 @@ export function BookingsTable({
             </div>
 
             <div className="space-y-1">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Khoảng thời gian</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Thời gian</p>
               <Select
                 value={dateRangeFilter}
                 onValueChange={(value) => {
@@ -572,7 +572,7 @@ export function BookingsTable({
             </div>
 
             <div className="space-y-1">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Dòng / trang</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Trang</p>
               <Select
                 value={String(rowsPerPage)}
                 onValueChange={(value) => {
