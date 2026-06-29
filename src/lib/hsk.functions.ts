@@ -1455,6 +1455,8 @@ export const rateTeacher = createServerFn({ method: "POST" })
         teacherId: z.string().min(1),
         stars: z.number().int().min(1).max(5),
         comment: z.string().max(500).optional(),
+        materialStars: z.number().int().min(1).max(5).optional(),
+        materialComment: z.string().max(500).optional(),
       })
       .parse(d),
   )
@@ -1580,6 +1582,8 @@ export const rateTeacher = createServerFn({ method: "POST" })
           student_id: me.specific_id,
           stars: data.stars,
           comment: data.comment?.trim() ? data.comment.trim() : null,
+          material_stars: data.materialStars ?? null,
+          material_comment: data.materialComment?.trim() ? data.materialComment.trim() : null,
           updated_at: new Date().toISOString(),
         },
         { onConflict: "student_id,class_id,session_date" },
@@ -1617,7 +1621,7 @@ export const getMyRatings = createServerFn({ method: "GET" })
 
     const sessionRatings = await supabaseAdmin
       .from("teacher_session_ratings")
-      .select("slot_id, class_id, session_date, stars, comment, created_at, teacher_id")
+      .select("slot_id, class_id, session_date, stars, comment, material_stars, material_comment, created_at, teacher_id")
       .eq("student_id", me.specific_id);
     if (sessionRatings.error && !isMissingTableError(String(sessionRatings.error.message ?? sessionRatings.error))) {
       throw new Error(sessionRatings.error.message);

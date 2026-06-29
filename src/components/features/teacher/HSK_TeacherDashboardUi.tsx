@@ -1272,41 +1272,53 @@ export function MyBookingsTable({
           <Table className="min-w-[1080px]">
             <TableHeader>
               <TableRow>
-                <TableHead className="min-w-[110px] whitespace-nowrap">
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
-                    onClick={() => handleSort("class_id")}
-                  >
+                <TableHead
+                  className="min-w-[110px] whitespace-nowrap cursor-pointer select-none font-display font-semibold transition-colors hover:bg-muted/50"
+                  onClick={() => handleSort("class_id")}
+                >
+                  <span className="inline-flex items-center gap-1 whitespace-nowrap">
                     Mã lớp
-                    {renderSortIcon("class_id")}
-                  </button>
+                    <span
+                      className={`text-[10px] transition-colors ${sortBy === "class_id" ? "text-blue-500" : "text-muted-foreground/30"}`}
+                      aria-hidden="true"
+                    >
+                      {sortBy === "class_id" && sortDirection === "desc" ? "▼" : "▲"}
+                    </span>
+                  </span>
                 </TableHead>
-                <TableHead className="min-w-[160px] whitespace-nowrap">
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
-                    onClick={() => handleSort("session_date")}
-                  >
-                    Thời gian
-                    {renderSortIcon("session_date")}
-                  </button>
+                <TableHead
+                  className="min-w-[160px] whitespace-nowrap cursor-pointer select-none font-display font-semibold transition-colors hover:bg-muted/50"
+                  onClick={() => handleSort("session_date")}
+                >
+                  <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                    Bắt đầu
+                    <span
+                      className={`text-[10px] transition-colors ${sortBy === "session_date" ? "text-blue-500" : "text-muted-foreground/30"}`}
+                      aria-hidden="true"
+                    >
+                      {sortBy === "session_date" && sortDirection === "desc" ? "▼" : "▲"}
+                    </span>
+                  </span>
                 </TableHead>
-                <TableHead className="min-w-[140px] whitespace-nowrap">Thời gian còn</TableHead>
-                <TableHead className="min-w-[100px] whitespace-nowrap">
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
-                    onClick={() => handleSort("status")}
-                  >
+                <TableHead className="whitespace-nowrap font-display font-semibold">TG vào lớp</TableHead>
+                <TableHead
+                  className="min-w-[100px] whitespace-nowrap cursor-pointer select-none font-display font-semibold transition-colors hover:bg-muted/50"
+                  onClick={() => handleSort("status")}
+                >
+                  <span className="inline-flex items-center gap-1 whitespace-nowrap">
                     Trạng thái
-                    {renderSortIcon("status")}
-                  </button>
+                    <span
+                      className={`text-[10px] transition-colors ${sortBy === "status" ? "text-blue-500" : "text-muted-foreground/30"}`}
+                      aria-hidden="true"
+                    >
+                      {sortBy === "status" && sortDirection === "desc" ? "▼" : "▲"}
+                    </span>
+                  </span>
                 </TableHead>
-                <TableHead className="min-w-[110px] whitespace-nowrap text-center">Điểm danh</TableHead>
-                <TableHead className="min-w-[110px] whitespace-nowrap text-center">Chấm điểm</TableHead>
-                <TableHead className="min-w-[110px] whitespace-nowrap text-center">Tài liệu</TableHead>
-                <TableHead className="min-w-[80px] whitespace-nowrap text-right">Hành động</TableHead>
+                <TableHead className="min-w-[110px] whitespace-nowrap text-center font-display font-semibold">Điểm danh</TableHead>
+                <TableHead className="min-w-[110px] whitespace-nowrap text-center font-display font-semibold">Chấm điểm</TableHead>
+                <TableHead className="min-w-[110px] whitespace-nowrap text-center font-display font-semibold">Tài liệu</TableHead>
+                <TableHead className="min-w-[80px] whitespace-nowrap text-right font-display font-semibold">Hành động</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>

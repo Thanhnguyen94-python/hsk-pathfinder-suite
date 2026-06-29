@@ -238,6 +238,8 @@ export function BookingsTable({
   const [ratingTarget, setRatingTarget] = useState<HSKSlot | null>(null);
   const [ratingStars, setRatingStars] = useState(5);
   const [ratingComment, setRatingComment] = useState("");
+  const [materialStars, setMaterialStars] = useState(5);
+  const [materialComment, setMaterialComment] = useState("");
 
   const rateMutation = useMutation({
     mutationFn: () => {
@@ -252,6 +254,8 @@ export function BookingsTable({
           teacherId: ratingTarget.teacher_id,
           stars: ratingStars,
           comment: ratingComment,
+          materialStars: materialStars,
+          materialComment: materialComment,
         },
       });
     },
@@ -262,6 +266,8 @@ export function BookingsTable({
       setRatingTarget(null);
       setRatingComment("");
       setRatingStars(5);
+      setMaterialComment("");
+      setMaterialStars(5);
     },
   });
 
@@ -279,6 +285,8 @@ export function BookingsTable({
     setRatingTarget(slot);
     setRatingStars(5);
     setRatingComment("");
+    setMaterialStars(5);
+    setMaterialComment("");
     setRatingDialogOpen(true);
   }
 
@@ -463,7 +471,7 @@ export function BookingsTable({
       />
 
       <Dialog open={ratingDialogOpen} onOpenChange={setRatingDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Đánh giá buổi học</DialogTitle>
             <DialogDescription>
@@ -471,30 +479,145 @@ export function BookingsTable({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex justify-center gap-1 py-2">
-            {[1, 2, 3, 4, 5].map((n) => (
-              <button
-                key={n}
-                type="button"
-                onClick={() => setRatingStars(n)}
-                className="p-1 transition-transform hover:scale-110"
-              >
-                <Star
-                  className={`h-8 w-8 ${
-                    n <= ratingStars ? "fill-warning text-warning" : "text-muted-foreground"
-                  }`}
-                />
-              </button>
-            ))}
-          </div>
+          <div className="space-y-4 py-2">
+            {/* Đánh giá giáo viên */}
+            <div className="space-y-3">
+              <h4 className="text-sm font-semibold text-foreground">Đánh giá giáo viên</h4>
+              <div className="flex justify-center gap-1">
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setRatingStars(n)}
+                    className="p-1 transition-transform hover:scale-110"
+                  >
+                    <Star
+                      className={`h-8 w-8 ${
+                        n <= ratingStars ? "fill-warning text-warning" : "text-muted-foreground"
+                      }`}
+                    />
+                  </button>
+                ))}
+              </div>
 
-          <Textarea
-            placeholder="Nhận xét buổi học (tuỳ chọn)"
-            value={ratingComment}
-            onChange={(e) => setRatingComment(e.target.value)}
-            maxLength={500}
-            rows={3}
-          />
+              {/* Gợi ý chọn nhanh giáo viên */}
+              <div className="flex flex-wrap gap-2 py-1 justify-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRatingComment((prev) => {
+                      const trimmed = prev.trim();
+                      if (!trimmed) return "Giáo viên dạy dễ hiểu";
+                      if (trimmed.includes("Giáo viên dạy dễ hiểu")) return prev;
+                      return `${trimmed}, giáo viên dạy dễ hiểu`;
+                    });
+                  }}
+                  className="rounded-full border border-border px-3 py-1 text-xs hover:bg-muted transition text-muted-foreground cursor-pointer"
+                >
+                  Giáo viên dạy dễ hiểu
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRatingComment((prev) => {
+                      const trimmed = prev.trim();
+                      if (!trimmed) return "Giáo viên nói khó nghe";
+                      if (trimmed.includes("Giáo viên nói khó nghe")) return prev;
+                      return `${trimmed}, giáo viên nói khó nghe`;
+                    });
+                  }}
+                  className="rounded-full border border-border px-3 py-1 text-xs hover:bg-muted transition text-muted-foreground cursor-pointer"
+                >
+                  Giáo viên nói khó nghe
+                </button>
+              </div>
+
+              <Textarea
+                placeholder="Nhận xét giáo viên (tuỳ chọn)"
+                value={ratingComment}
+                onChange={(e) => setRatingComment(e.target.value)}
+                maxLength={500}
+                rows={2}
+              />
+            </div>
+
+            <hr className="border-border" />
+
+            {/* Đánh giá tài liệu */}
+            <div className="space-y-3">
+              <h4 className="text-sm font-semibold text-foreground">Đánh giá chất lượng tài liệu</h4>
+              <div className="flex justify-center gap-1">
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setMaterialStars(n)}
+                    className="p-1 transition-transform hover:scale-110"
+                  >
+                    <Star
+                      className={`h-8 w-8 ${
+                        n <= materialStars ? "fill-warning text-warning" : "text-muted-foreground"
+                      }`}
+                    />
+                  </button>
+                ))}
+              </div>
+
+              {/* Gợi ý chọn nhanh tài liệu */}
+              <div className="flex flex-wrap gap-2 py-1 justify-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMaterialComment((prev) => {
+                      const trimmed = prev.trim();
+                      if (!trimmed) return "Tài liệu dễ hiểu";
+                      if (trimmed.includes("Tài liệu dễ hiểu")) return prev;
+                      return `${trimmed}, tài liệu dễ hiểu`;
+                    });
+                  }}
+                  className="rounded-full border border-border px-3 py-1 text-xs hover:bg-muted transition text-muted-foreground cursor-pointer"
+                >
+                  Tài liệu dễ hiểu
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMaterialComment((prev) => {
+                      const trimmed = prev.trim();
+                      if (!trimmed) return "Tài liệu khó hiểu";
+                      if (trimmed.includes("Tài liệu khó hiểu")) return prev;
+                      return `${trimmed}, tài liệu khó hiểu`;
+                    });
+                  }}
+                  className="rounded-full border border-border px-3 py-1 text-xs hover:bg-muted transition text-muted-foreground cursor-pointer"
+                >
+                  Tài liệu khó hiểu
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMaterialComment((prev) => {
+                      const trimmed = prev.trim();
+                      if (!trimmed) return "Thiếu tài liệu";
+                      if (trimmed.includes("Thiếu tài liệu")) return prev;
+                      return `${trimmed}, thiếu tài liệu`;
+                    });
+                  }}
+                  className="rounded-full border border-border px-3 py-1 text-xs hover:bg-muted transition text-muted-foreground cursor-pointer"
+                >
+                  Thiếu tài liệu
+                </button>
+              </div>
+
+              <Textarea
+                placeholder="Nhận xét tài liệu (tuỳ chọn)"
+                value={materialComment}
+                onChange={(e) => setMaterialComment(e.target.value)}
+                maxLength={500}
+                rows={2}
+              />
+            </div>
+          </div>
 
           {rateMutation.isError && (
             <p className="text-sm text-destructive">{(rateMutation.error as Error).message}</p>
@@ -624,61 +747,81 @@ export function BookingsTable({
         <Table className="min-w-[1000px]">
           <TableHeader>
             <TableRow>
-              <TableHead className="min-w-[180px] whitespace-nowrap">
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-1 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
-                  onClick={() => handleSort("class_id")}
-                >
+              <TableHead
+                className="min-w-[180px] whitespace-nowrap cursor-pointer select-none font-display font-semibold transition-colors hover:bg-muted/50"
+                onClick={() => handleSort("class_id")}
+              >
+                <span className="inline-flex items-center gap-1 whitespace-nowrap">
                   Mã lớp
-                  {renderSortIcon("class_id")}
-                </button>
+                  <span
+                    className={`text-[10px] transition-colors ${sortBy === "class_id" ? "text-blue-500" : "text-muted-foreground/30"}`}
+                    aria-hidden="true"
+                  >
+                    {sortBy === "class_id" && sortDirection === "desc" ? "▼" : "▲"}
+                  </span>
+                </span>
               </TableHead>
-              <TableHead className="min-w-[180px] whitespace-nowrap">
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-1 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
-                  onClick={() => handleSort("course_name")}
-                >
+              <TableHead
+                className="min-w-[180px] whitespace-nowrap cursor-pointer select-none font-display font-semibold transition-colors hover:bg-muted/50"
+                onClick={() => handleSort("course_name")}
+              >
+                <span className="inline-flex items-center gap-1 whitespace-nowrap">
                   Tên lớp
-                  {renderSortIcon("course_name")}
-                </button>
+                  <span
+                    className={`text-[10px] transition-colors ${sortBy === "course_name" ? "text-blue-500" : "text-muted-foreground/30"}`}
+                    aria-hidden="true"
+                  >
+                    {sortBy === "course_name" && sortDirection === "desc" ? "▼" : "▲"}
+                  </span>
+                </span>
               </TableHead>
-              <TableHead className="min-w-[150px] whitespace-nowrap">
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-1 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
-                  onClick={() => handleSort("teacher_name")}
-                >
-                  Tên giáo viên
-                  {renderSortIcon("teacher_name")}
-                </button>
+              <TableHead
+                className="min-w-[150px] whitespace-nowrap cursor-pointer select-none font-display font-semibold transition-colors hover:bg-muted/50"
+                onClick={() => handleSort("teacher_name")}
+              >
+                <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                  Giáo viên
+                  <span
+                    className={`text-[10px] transition-colors ${sortBy === "teacher_name" ? "text-blue-500" : "text-muted-foreground/30"}`}
+                    aria-hidden="true"
+                  >
+                    {sortBy === "teacher_name" && sortDirection === "desc" ? "▼" : "▲"}
+                  </span>
+                </span>
               </TableHead>
-              <TableHead className="min-w-[160px] whitespace-nowrap">
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-1 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
-                  onClick={() => handleSort("session_date")}
-                >
-                  Thời gian bắt đầu
-                  {renderSortIcon("session_date")}
-                </button>
+              <TableHead
+                className="min-w-[160px] whitespace-nowrap cursor-pointer select-none font-display font-semibold transition-colors hover:bg-muted/50"
+                onClick={() => handleSort("session_date")}
+              >
+                <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                  T/G bắt đầu
+                  <span
+                    className={`text-[10px] transition-colors ${sortBy === "session_date" ? "text-blue-500" : "text-muted-foreground/30"}`}
+                    aria-hidden="true"
+                  >
+                    {sortBy === "session_date" && sortDirection === "desc" ? "▼" : "▲"}
+                  </span>
+                </span>
               </TableHead>
-              <TableHead className="min-w-[160px] whitespace-nowrap">Kết thúc (thực tế)</TableHead>
-              <TableHead className="min-w-[100px] whitespace-nowrap">Độ dài</TableHead>
-              <TableHead className="min-w-[180px] whitespace-nowrap">Ghi chú GV</TableHead>
-              <TableHead className="min-w-[100px] whitespace-nowrap">Tài liệu</TableHead>
-              <TableHead className="min-w-[120px] whitespace-nowrap">
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-1 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
-                  onClick={() => handleSort("status")}
-                >
+              <TableHead className="min-w-[160px] whitespace-nowrap font-display font-semibold">T/G kết thúc</TableHead>
+              <TableHead className="min-w-[100px] whitespace-nowrap font-display font-semibold">Số giờ</TableHead>
+              <TableHead className="min-w-[180px] whitespace-nowrap font-display font-semibold">GV ghi chú</TableHead>
+              <TableHead className="min-w-[100px] whitespace-nowrap font-display font-semibold">Tài liệu</TableHead>
+              <TableHead
+                className="min-w-[120px] whitespace-nowrap cursor-pointer select-none font-display font-semibold transition-colors hover:bg-muted/50"
+                onClick={() => handleSort("status")}
+              >
+                <span className="inline-flex items-center gap-1 whitespace-nowrap">
                   Trạng thái
-                  {renderSortIcon("status")}
-                </button>
+                  <span
+                    className={`text-[10px] transition-colors ${sortBy === "status" ? "text-blue-500" : "text-muted-foreground/30"}`}
+                    aria-hidden="true"
+                  >
+                    {sortBy === "status" && sortDirection === "desc" ? "▼" : "▲"}
+                  </span>
+                </span>
               </TableHead>
-              <TableHead className="min-w-[140px] whitespace-nowrap text-right">Hành động</TableHead>
+              <TableHead className="min-w-[140px] whitespace-nowrap text-right font-display font-semibold">Hành động</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
