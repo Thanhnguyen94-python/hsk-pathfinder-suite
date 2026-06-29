@@ -118,7 +118,7 @@ export function HSK_TeacherDashboardView() {
           <TabsTrigger value="my-bookings">Lịch dạy</TabsTrigger>
           <TabsTrigger value="lookup">Tra cứu</TabsTrigger>
           <TabsTrigger value="leave">Xin nghỉ</TabsTrigger>
-          <TabsTrigger value="penalties">Chuyên cần</TabsTrigger>
+          <TabsTrigger value="penalties">Vi phạm</TabsTrigger>
           <TabsTrigger value="notices">Thông báo</TabsTrigger>
         </TabsList>
         <TabsContent value="pending-slots" className="mt-6">

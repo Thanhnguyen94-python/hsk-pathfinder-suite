@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS public.classes (
   max_students integer NOT NULL DEFAULT 10,
   teacher_id text,
   room_link text,
+  class_materials jsonb NOT NULL DEFAULT '[]'::jsonb,
   status text NOT NULL DEFAULT 'pending',
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()

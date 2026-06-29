@@ -67,6 +67,52 @@ Cải tiến đã áp dụng:
 - Giảm state/effect dư thừa trong `AdminMappingPanel`
 - Gom các đoạn refresh lặp lại vào helper (`refreshClassesList`, `refreshEnrollmentsForClass`)
 
+## Chuẩn bị tài liệu + Map tài liệu buổi học (mới)
+
+### Tính năng mới
+
+- Tab Admin mới:
+  - `Chuẩn bị tài liệu`: quản lý bài học HSK1–HSK9, upload nhiều tài liệu cho từng bài.
+  - `Map tài liệu buổi học`: map bài học vào từng buổi học theo lớp, có thống kê đã map/chưa map.
+- Student/Teacher sử dụng tài liệu theo map `class_id + session_date` để hiển thị cột **Tài liệu** ổn định.
+
+### CSDL mới
+
+Đã thêm migration:
+
+- [supabase/migrations/20260629113000_hsk_lessons_and_session_material_map.sql](supabase/migrations/20260629113000_hsk_lessons_and_session_material_map.sql)
+
+Các bảng mới:
+
+- `public.hsk_lessons`
+- `public.class_session_material_map`
+
+### Hướng dẫn triển khai Supabase (bắt buộc)
+
+1. Chạy migration mới trên Supabase (SQL Editor hoặc CLI).
+2. Tạo bucket Storage tên `hsk-materials`.
+3. Đặt bucket ở chế độ **Public** (để client mở link trực tiếp).
+
+Nếu bạn muốn tạo bằng SQL (SQL Editor):
+
+```sql
+insert into storage.buckets (id, name, public)
+values ('hsk-materials', 'hsk-materials', true)
+on conflict (id) do nothing;
+```
+
+Policy storage tối thiểu (cho người đã đăng nhập đọc, chỉ admin mới upload/xóa qua app backend):
+
+```sql
+-- read
+drop policy if exists "hsk-materials read auth" on storage.objects;
+create policy "hsk-materials read auth"
+on storage.objects for select to authenticated
+using (bucket_id = 'hsk-materials');
+```
+
+> Upload/xóa trong app được thực hiện qua server function dùng service role (`supabaseAdmin`), nên không cần mở policy ghi trực tiếp cho client.
+
 ## Checklist trước khi commit
 
 ```bash

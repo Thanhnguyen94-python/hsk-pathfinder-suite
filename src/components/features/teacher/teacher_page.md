@@ -120,7 +120,7 @@ Hiện bảng đã hiển thị các cột:
 - Bảng `MyBookingsTable` đã thêm cột **Tài liệu**.
 - Link tài liệu được resolve theo thứ tự:
     1. `material_url` của chính row buổi học.
-    2. Nếu row chưa có, lấy theo map tài liệu theo `class_id` (đảm bảo khớp theo mã lớp).
+    2. Nếu row chưa có, lấy theo map buổi học `class_id + session_date` từ `class_session_material_map`.
 
 ### B. Thêm panel “Lớp của tôi” và lọc theo lớp
 
@@ -169,3 +169,11 @@ sequenceDiagram
         VM-->>View: Cache cập nhật
         View-->>UI: Render từng buổi học theo từng row
 ```
+
+## 6) Cập nhật map tài liệu buổi học (29/06/2026)
+
+- File backend: [src/lib/hsk.functions.ts](src/lib/hsk.functions.ts)
+    - `getTeacherDashboard` đã bổ sung resolve tài liệu theo map buổi học (`class_session_material_map` + `hsk_lessons`).
+    - Áp dụng cho cả row booking thật và row sinh từ lớp cố định.
+- File UI: [src/components/features/teacher/HSK_TeacherDashboardUi.tsx](src/components/features/teacher/HSK_TeacherDashboardUi.tsx)
+    - Giữ nguyên cột **Tài liệu**, nhưng dữ liệu nguồn đã được nâng cấp ở backend để ổn định theo từng buổi học.

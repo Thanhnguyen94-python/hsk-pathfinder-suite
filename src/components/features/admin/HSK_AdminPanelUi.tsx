@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Table,
   TableBody,
@@ -9,8 +10,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Star, MoreHorizontal, Pencil, Trash2, Eye, EyeOff, ChevronDown, Plus, Minus } from "lucide-react";
-import { useState, useEffect, useRef } from "react";
+import { Star, MoreHorizontal, Pencil, Trash2, Eye, EyeOff, ChevronDown, Plus, Minus, Download } from "lucide-react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
@@ -53,6 +54,55 @@ const CLASS_STATUS_LABELS: Record<string, string> = {
   pending: 'Chờ khai giảng',
   active: 'Đang hoạt động',
   completed: 'Đã hoàn thành',
+};
+
+type ClassMaterial = {
+  name: string;
+  url: string;
+  mimeType?: string | null;
+  size?: number | null;
+  uploadedAt?: string | null;
+};
+
+const normalizeClassMaterials = (raw: any): ClassMaterial[] => {
+  const rows = Array.isArray(raw) ? raw : [];
+  return rows
+    .filter((x: any) => x && (x.url || x.name))
+    .map((x: any) => ({
+      name: String(x.name ?? "Tài liệu"),
+      url: String(x.url ?? ""),
+      mimeType: x.mimeType ? String(x.mimeType) : null,
+      size: Number.isFinite(Number(x.size)) ? Number(x.size) : null,
+      uploadedAt: x.uploadedAt ? String(x.uploadedAt) : null,
+    }))
+    .filter((x: ClassMaterial) => Boolean(x.url));
+};
+
+const readFileAsDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(new Error(`Không thể đọc file: ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+
+const formatFileSize = (size?: number | null) => {
+  const bytes = Number(size ?? 0);
+  if (!bytes || bytes <= 0) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+};
+
+const triggerMaterialDownload = (material: ClassMaterial) => {
+  if (!material?.url) return;
+  const a = document.createElement("a");
+  a.href = material.url;
+  a.download = material.name || "tai-lieu";
+  a.target = "_blank";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 };
 
 const csvEscape = (v: any) => {
@@ -1723,9 +1773,13 @@ export function AdminClassesPanel({
     maxStudents: 10,
     teacherId: "",
     roomLink: "",
+    classMaterials: [] as ClassMaterial[],
     status: "pending",
   });
   const [deleting, setDeleting] = useState<any>(null);
+  const [downloadingMaterialsClass, setDownloadingMaterialsClass] = useState<any>(null);
+  const [materialsError, setMaterialsError] = useState<string | null>(null);
+  const materialsFileInputRef = useRef<HTMLInputElement | null>(null);
   const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
     class_id: true,
     class_name: true,
@@ -1739,6 +1793,7 @@ export function AdminClassesPanel({
     end_time: false,
     max_students: false,
     room_link: false,
+    class_materials: true,
     status: true,
     created_at: false,
     updated_at: false,
@@ -1765,6 +1820,7 @@ export function AdminClassesPanel({
 
     if (searchColumn === 'all') {
       if (match(c.class_id) || match(c.class_name) || match(c.teacher_id) || match(currentStudentCounts?.[c.class_id] ?? c.current_students) || match(c.total_lessons) || match(c.start_date) || match(c.end_date) || match(c.start_time) || match(c.end_time) || match(c.max_students) || match(c.room_link) || match(c.status)) return true;
+      if (normalizeClassMaterials(c.class_materials).some((m) => match(m.name))) return true;
       // schedule days labels
       if (Array.isArray(c.schedule_days) && (c.schedule_days ?? []).some((d: number) => String(DAYS.find(x => x.v === d)?.label ?? d).toLowerCase().includes(q))) return true;
       const t = findTeacher();
@@ -1815,6 +1871,7 @@ export function AdminClassesPanel({
       teacherId: "",
       roomLink: "",
       status: "pending",
+      classMaterials: [] as ClassMaterial[],
     });
   };
 
@@ -1833,7 +1890,40 @@ export function AdminClassesPanel({
       teacherId: c.teacher_id ?? "",
       roomLink: c.room_link ?? "",
       status: c.status ?? "pending",
+      classMaterials: normalizeClassMaterials(c.class_materials),
     });
+  };
+
+  const handleAppendClassMaterials = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setMaterialsError(null);
+    try {
+      const fileArray = Array.from(files);
+      const tooLarge = fileArray.find((f) => f.size > 8 * 1024 * 1024);
+      if (tooLarge) {
+        setMaterialsError(`File ${tooLarge.name} vượt quá 8MB. Vui lòng chọn file nhỏ hơn.`);
+        return;
+      }
+
+      const nextFiles = await Promise.all(
+        fileArray.map(async (f) => ({
+          name: f.name,
+          url: await readFileAsDataUrl(f),
+          mimeType: f.type || null,
+          size: f.size,
+          uploadedAt: new Date().toISOString(),
+        })),
+      );
+
+      setForm((s: any) => ({
+        ...s,
+        classMaterials: [...normalizeClassMaterials(s.classMaterials), ...nextFiles],
+      }));
+    } catch (e: any) {
+      setMaterialsError(e?.message ?? "Không thể tải tài liệu lên.");
+    } finally {
+      if (materialsFileInputRef.current) materialsFileInputRef.current.value = "";
+    }
   };
 
   const submit = () => {
@@ -1849,6 +1939,7 @@ export function AdminClassesPanel({
       maxStudents: Number(form.maxStudents) || 10,
       teacherId: form.teacherId || undefined,
       roomLink: form.roomLink || undefined,
+      classMaterials: normalizeClassMaterials(form.classMaterials),
       status: form.status,
     };
     if (editing) {
@@ -1863,6 +1954,7 @@ export function AdminClassesPanel({
         max_students: payload.maxStudents,
         teacher_id: payload.teacherId,
         room_link: payload.roomLink,
+        class_materials: payload.classMaterials,
         status: payload.status,
       }});
     } else {
@@ -1972,6 +2064,58 @@ export function AdminClassesPanel({
             <Input value={form.roomLink} onChange={(e) => setForm((s:any)=>({...s,roomLink:e.target.value}))} />
           </div>
 
+          <div className="space-y-1.5 lg:col-span-2">
+            <Label>Tài liệu</Label>
+            <input
+              ref={materialsFileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => handleAppendClassMaterials(e.target.files)}
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" variant="outline" onClick={() => materialsFileInputRef.current?.click()}>
+                Chọn file tài liệu
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setForm((s:any)=>({ ...s, classMaterials: [] }))}
+                disabled={normalizeClassMaterials(form.classMaterials).length === 0}
+              >
+                Xóa tất cả
+              </Button>
+            </div>
+            <div className="rounded-md border border-border bg-muted/10 p-2 text-sm">
+              {normalizeClassMaterials(form.classMaterials).length === 0 ? (
+                <div className="text-muted-foreground">Chưa có tài liệu.</div>
+              ) : (
+                <div className="space-y-1">
+                  {normalizeClassMaterials(form.classMaterials).map((m, idx) => (
+                    <div key={`${m.name}-${idx}`} className="flex items-center justify-between gap-2">
+                      <div className="truncate">
+                        {m.name}
+                        {m.size ? <span className="ml-2 text-xs text-muted-foreground">({formatFileSize(m.size)})</span> : null}
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setForm((s:any) => ({
+                          ...s,
+                          classMaterials: normalizeClassMaterials(s.classMaterials).filter((_: ClassMaterial, i: number) => i !== idx),
+                        }))}
+                      >
+                        Xóa
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            {materialsError && <div className="text-xs text-destructive">{materialsError}</div>}
+          </div>
+
           <div className="space-y-1.5">
             <Label>Trạng thái</Label>
             <Select value={form.status} onValueChange={(v) => setForm((s:any)=>({...s,status:v}))}>
@@ -2016,7 +2160,7 @@ export function AdminClassesPanel({
               <Input placeholder="Tìm kiếm" value={filterText} onChange={(e) => setFilterText(e.target.value)} />
               <Button size="sm" variant="ghost" onClick={() => {
                 // export CSV
-                const cols = ['class_id','class_name','teacher_id','current_students','schedule_days','total_lessons','start_date','end_date','start_time','end_time','max_students','room_link','status','created_at','updated_at'];
+                const cols = ['class_id','class_name','teacher_id','current_students','schedule_days','total_lessons','start_date','end_date','start_time','end_time','max_students','room_link','class_materials','status','created_at','updated_at'];
                 const formatSchedule = (sd: any) => {
                   if (!sd) return '';
                   try {
@@ -2032,10 +2176,11 @@ export function AdminClassesPanel({
                 const rows = displayed.map((c:any) => cols.map((k) => {
                   if (k === 'schedule_days') return csvEscape(formatSchedule(c.schedule_days));
                   if (k === 'current_students') return csvEscape(currentStudentCounts?.[c.class_id] ?? c.current_students ?? 0);
+                  if (k === 'class_materials') return csvEscape(normalizeClassMaterials(c.class_materials).map((m) => m.name).join('; '));
                   if (k === 'start_date' || k === 'end_date' || k === 'created_at' || k === 'updated_at') return csvEscape(formatDate(c[k]));
                   return csvEscape(c[k] ?? '');
                 }).join(','));
-                const header = ['class_id','class_name','teacher_id','current_students','schedule_days','total_lessons','start_date','end_date','start_time','end_time','max_students','room_link','status','created_at','updated_at'].map((h)=>csvEscape(h)).join(',');
+                const header = ['class_id','class_name','teacher_id','current_students','schedule_days','total_lessons','start_date','end_date','start_time','end_time','max_students','room_link','class_materials','status','created_at','updated_at'].map((h)=>csvEscape(h)).join(',');
                 const csv = [header, ...rows].join('\n');
                 downloadCsv(csv, `hsk_classes_${new Date().toISOString().slice(0,10)}.csv`);
               }}>Export</Button>
@@ -2060,6 +2205,7 @@ export function AdminClassesPanel({
                       { key: 'end_time', label: 'Giờ kết thúc' },
                       { key: 'max_students', label: 'Sĩ số tối đa' },
                       { key: 'room_link', label: 'Room / Link' },
+                      { key: 'class_materials', label: 'Tài liệu' },
                       { key: 'status', label: 'Trạng thái' },
                       { key: 'created_at', label: 'Tạo lúc' },
                       { key: 'updated_at', label: 'Cập nhật lúc' },
@@ -2082,7 +2228,7 @@ export function AdminClassesPanel({
         </div>
 
         {(() => {
-          const colOrder = ['class_id','class_name','teacher_id','current_students','schedule_days','total_lessons','start_date','end_date','start_time','end_time','max_students','room_link','status','created_at','updated_at'];
+          const colOrder = ['class_id','class_name','teacher_id','current_students','schedule_days','total_lessons','start_date','end_date','start_time','end_time','max_students','room_link','class_materials','status','created_at','updated_at'];
           const labels: Record<string,string> = {
             class_id: 'Mã',
             class_name: 'Tên lớp',
@@ -2096,6 +2242,7 @@ export function AdminClassesPanel({
             end_time: 'Giờ kết thúc',
             max_students: 'Sĩ số tối đa',
             room_link: 'Room / Link',
+            class_materials: 'Tài liệu',
             status: 'Trạng thái',
             created_at: 'Tạo lúc',
             updated_at: 'Cập nhật lúc',
@@ -2152,6 +2299,15 @@ export function AdminClassesPanel({
                         if (k === 'end_time') return <TableCell key={k} className="text-xs">{c.end_time ?? '—'}</TableCell>;
                         if (k === 'max_students') return <TableCell key={k} className="text-xs">{c.max_students ?? '—'}</TableCell>;
                         if (k === 'room_link') return <TableCell key={k} className="text-xs">{c.room_link ? <a href={c.room_link} target="_blank" rel="noreferrer" className="text-primary underline">Link</a> : '—'}</TableCell>;
+                        if (k === 'class_materials') {
+                          const materials = normalizeClassMaterials(c.class_materials);
+                          if (materials.length === 0) return <TableCell key={k} className="text-xs">—</TableCell>;
+                          return (
+                            <TableCell key={k} className="text-xs">
+                              <div className="max-w-[220px] truncate">{materials.length} tài liệu — {materials.slice(0, 2).map((m) => m.name).join(', ')}{materials.length > 2 ? '...' : ''}</div>
+                            </TableCell>
+                          );
+                        }
                         if (k === 'status') return <TableCell key={k}><span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${c.status === 'active' ? 'bg-emerald-100 text-emerald-700' : c.status === 'completed' ? 'bg-muted text-muted-foreground' : 'bg-yellow-100 text-yellow-800'}`}>{CLASS_STATUS_LABELS[c.status] ?? c.status}</span></TableCell>;
                         if (k === 'created_at') return <TableCell key={k} className="text-xs">{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</TableCell>;
                         if (k === 'updated_at') return <TableCell key={k} className="text-xs">{c.updated_at ? new Date(c.updated_at).toLocaleString() : '—'}</TableCell>;
@@ -2163,6 +2319,9 @@ export function AdminClassesPanel({
                             <Button variant="ghost" className="h-8 w-8 p-0"><MoreHorizontal className="h-4 w-4" /></Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => setDownloadingMaterialsClass(c)}>
+                              <Download className="mr-2 h-4 w-4"/> Tải tài liệu
+                            </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => openEdit(c)}><Pencil className="mr-2 h-4 w-4"/> Chỉnh sửa</DropdownMenuItem>
                             <DropdownMenuItem className="text-destructive" onClick={() => setDeleting(c)}><Trash2 className="mr-2 h-4 w-4"/> Xoá</DropdownMenuItem>
                           </DropdownMenuContent>
@@ -2177,6 +2336,33 @@ export function AdminClassesPanel({
         })()}
       </div>
 
+      <Dialog open={!!downloadingMaterialsClass} onOpenChange={(v) => !v && setDownloadingMaterialsClass(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Tải tài liệu lớp {downloadingMaterialsClass?.class_id ?? ""}</DialogTitle>
+            <DialogDescription>Chọn tài liệu bạn muốn tải xuống.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {normalizeClassMaterials(downloadingMaterialsClass?.class_materials).length === 0 ? (
+              <div className="text-sm text-muted-foreground">Lớp này chưa có tài liệu.</div>
+            ) : (
+              normalizeClassMaterials(downloadingMaterialsClass?.class_materials).map((m, idx) => (
+                <div key={`${m.name}-${idx}`} className="flex items-center justify-between gap-3 rounded-md border border-border p-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">{m.name}</div>
+                    <div className="text-xs text-muted-foreground">{formatFileSize(m.size) || "Không rõ dung lượng"}</div>
+                  </div>
+                  <Button size="sm" onClick={() => triggerMaterialDownload(m)}>Tải</Button>
+                </div>
+              ))
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDownloadingMaterialsClass(null)}>Đóng</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <AlertDialog open={!!deleting} onOpenChange={(v)=>!v && setDeleting(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -2189,6 +2375,529 @@ export function AdminClassesPanel({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+type LessonMaterial = {
+  name: string;
+  url: string;
+  storage_path?: string | null;
+  mime_type?: string | null;
+  size?: number | null;
+  uploaded_at?: string | null;
+};
+
+type HskLessonItem = {
+  lesson_id: string;
+  lesson_code: string;
+  hsk_level: number;
+  lesson_no: number;
+  lesson_title: string;
+  materials: LessonMaterial[];
+};
+
+const normalizeLessonMaterialRows = (raw: any): LessonMaterial[] => {
+  const rows = Array.isArray(raw) ? raw : [];
+  return rows
+    .filter((x: any) => x && (x.url || x.name))
+    .map((x: any) => ({
+      name: String(x.name ?? "Tài liệu"),
+      url: String(x.url ?? ""),
+      storage_path: x.storage_path ? String(x.storage_path) : null,
+      mime_type: x.mime_type ? String(x.mime_type) : null,
+      size: Number.isFinite(Number(x.size)) ? Number(x.size) : null,
+      uploaded_at: x.uploaded_at ? String(x.uploaded_at) : null,
+    }))
+    .filter((x: LessonMaterial) => Boolean(x.url));
+};
+
+const toBase64Raw = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result ?? "");
+      const idx = result.indexOf(",");
+      resolve(idx >= 0 ? result.slice(idx + 1) : result);
+    };
+    reader.onerror = () => reject(new Error(`Không thể đọc file ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+
+const parseLessonNoInput = (raw: string): number | undefined => {
+  const text = String(raw ?? "").trim();
+  if (!text) return undefined;
+  const matched = text.match(/\d+/);
+  if (!matched) return NaN as unknown as number;
+  const n = Number(matched[0]);
+  if (!Number.isInteger(n) || n <= 0) return NaN as unknown as number;
+  return n;
+};
+
+export function AdminLessonPrepPanel({
+  lessons,
+  isPending,
+  onCreateLesson,
+  onUpdateLesson,
+  onDeleteLesson,
+  onUploadMaterial,
+  onRemoveMaterial,
+}: {
+  lessons: HskLessonItem[];
+  isPending: boolean;
+  onCreateLesson: (payload: { hskLevel: number; lessonNo?: number; lessonTitle: string }) => Promise<any>;
+  onUpdateLesson: (payload: { lessonId: string; lessonTitle?: string; materials?: LessonMaterial[] }) => Promise<any>;
+  onDeleteLesson: (lessonId: string) => Promise<any>;
+  onUploadMaterial: (payload: { lessonId: string; fileName: string; contentType?: string; base64: string }) => Promise<any>;
+  onRemoveMaterial: (payload: { lessonId: string; storagePath: string }) => Promise<any>;
+}) {
+  const [selectedLevel, setSelectedLevel] = useState<string>("all");
+  const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
+  const [draftTitle, setDraftTitle] = useState("");
+  const [creatingLevel, setCreatingLevel] = useState<number | null>(null);
+  const [newLessonTitle, setNewLessonTitle] = useState("");
+  const [newLessonNo, setNewLessonNo] = useState<string>("");
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const levels = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+  const lessonRows = (lessons ?? []).map((x: any) => ({
+    ...x,
+    materials: normalizeLessonMaterialRows(x.materials),
+  }));
+
+  const lessonsByLevel = useMemo(() => {
+    const map = new Map<number, HskLessonItem[]>();
+    for (const lv of levels) map.set(lv, []);
+    for (const row of lessonRows) {
+      const lv = Number(row.hsk_level ?? 0);
+      if (!map.has(lv)) map.set(lv, []);
+      map.get(lv)?.push(row);
+    }
+    for (const lv of levels) {
+      const sorted = (map.get(lv) ?? []).sort((a, b) => Number(a.lesson_no ?? 0) - Number(b.lesson_no ?? 0));
+      map.set(lv, sorted);
+    }
+    return map;
+  }, [lessons]);
+
+  const selectedLesson = lessonRows.find((x) => x.lesson_id === selectedLessonId) ?? null;
+
+  useEffect(() => {
+    if (!selectedLesson) return;
+    setDraftTitle(selectedLesson.lesson_title ?? "");
+  }, [selectedLessonId, selectedLesson?.lesson_title]);
+
+  const openCreateForLevel = (level: number) => {
+    setCreatingLevel(level);
+    setSelectedLessonId(null);
+    setNewLessonTitle("");
+    setNewLessonNo("");
+    setActionError(null);
+    setActionSuccess(null);
+  };
+
+  const handleCreateLesson = async () => {
+    if (!creatingLevel) return;
+    if (!newLessonTitle.trim()) {
+      setActionError("Vui lòng nhập tên bài học.");
+      return;
+    }
+
+    const parsedLessonNo = parseLessonNoInput(newLessonNo);
+    if (newLessonNo.trim() && Number.isNaN(parsedLessonNo)) {
+      setActionError("Số bài không hợp lệ. Ví dụ hợp lệ: 1 hoặc Bài 1.");
+      return;
+    }
+
+    setActionError(null);
+    setActionSuccess(null);
+
+    try {
+      await onCreateLesson({
+        hskLevel: creatingLevel,
+        lessonNo: parsedLessonNo,
+        lessonTitle: newLessonTitle.trim(),
+      });
+      setActionSuccess("Tạo bài học thành công.");
+      setCreatingLevel(null);
+      setNewLessonTitle("");
+      setNewLessonNo("");
+    } catch (e: any) {
+      setActionError(e?.message ?? "Không thể tạo bài học.");
+    }
+  };
+
+  const handleSaveLesson = async () => {
+    if (!selectedLesson) return;
+    if (!draftTitle.trim()) {
+      setActionError("Tên bài học không được để trống.");
+      return;
+    }
+    setActionError(null);
+    setActionSuccess(null);
+    try {
+      await onUpdateLesson({ lessonId: selectedLesson.lesson_id, lessonTitle: draftTitle.trim() });
+      setActionSuccess("Đã lưu bài học.");
+    } catch (e: any) {
+      setActionError(e?.message ?? "Không thể lưu bài học.");
+    }
+  };
+
+  const handleDeleteLesson = async () => {
+    if (!selectedLesson) return;
+    if (!confirm(`Xóa ${selectedLesson.lesson_code} - ${selectedLesson.lesson_title}?`)) return;
+    setActionError(null);
+    setActionSuccess(null);
+    try {
+      await onDeleteLesson(selectedLesson.lesson_id);
+      setSelectedLessonId(null);
+      setActionSuccess("Đã xóa bài học.");
+    } catch (e: any) {
+      setActionError(e?.message ?? "Không thể xóa bài học.");
+    }
+  };
+
+  const handleUploadFiles = async (files: FileList | null) => {
+    if (!selectedLesson || !files || files.length === 0) return;
+    setUploading(true);
+    setActionError(null);
+    try {
+      for (const file of Array.from(files)) {
+        const base64 = await toBase64Raw(file);
+        await onUploadMaterial({
+          lessonId: selectedLesson.lesson_id,
+          fileName: file.name,
+          contentType: file.type || "application/octet-stream",
+          base64,
+        });
+      }
+      setActionSuccess("Tải tài liệu lên thành công.");
+    } catch (e: any) {
+      setActionError(e?.message ?? "Không thể tải tài liệu lên.");
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const levelSections = selectedLevel === "all" ? levels : [Number(selectedLevel)];
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-border bg-card p-4">
+        <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+          <div className="space-y-1.5">
+            <Label>Filter cấp độ</Label>
+            <Select value={selectedLevel} onValueChange={setSelectedLevel}>
+              <SelectTrigger className="w-full md:w-[220px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tất cả</SelectItem>
+                {levels.map((lv) => (
+                  <SelectItem key={lv} value={String(lv)}>{`HSK${lv}`}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[1.6fr_1fr]">
+        <div className="rounded-xl border border-border bg-card p-4">
+          <div className="space-y-5">
+            {levelSections.map((lv) => {
+              const rows = lessonsByLevel.get(lv) ?? [];
+              return (
+                <div key={lv} className="space-y-2">
+                  <h3 className="font-display text-base font-semibold">HSK{lv}:</h3>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+                    {rows.map((lesson: HskLessonItem) => (
+                      <Button
+                        key={lesson.lesson_id}
+                        type="button"
+                        variant={selectedLessonId === lesson.lesson_id ? "default" : "outline"}
+                        className="justify-start"
+                        onClick={() => {
+                          setCreatingLevel(null);
+                          setSelectedLessonId(lesson.lesson_id);
+                          setActionError(null);
+                          setActionSuccess(null);
+                        }}
+                      >
+                        Bài {lesson.lesson_no}
+                      </Button>
+                    ))}
+                    <Button type="button" variant="secondary" onClick={() => openCreateForLevel(lv)}>
+                      + Thêm
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-border bg-card p-4">
+          {creatingLevel ? (
+            <div className="space-y-3">
+              <h4 className="font-semibold">Tạo bài học mới (HSK{creatingLevel})</h4>
+              <div className="space-y-1.5">
+                <Label>Số bài (tuỳ chọn)</Label>
+                <Input value={newLessonNo} onChange={(e) => setNewLessonNo(e.target.value)} placeholder="Ví dụ: 5" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Tên bài học</Label>
+                <Textarea value={newLessonTitle} onChange={(e) => setNewLessonTitle(e.target.value)} placeholder="Nhập tên bài học" />
+              </div>
+              <div className="flex gap-2">
+                <Button onClick={handleCreateLesson} disabled={isPending}>Tạo bài học</Button>
+                <Button variant="outline" onClick={() => setCreatingLevel(null)}>Hủy</Button>
+              </div>
+            </div>
+          ) : selectedLesson ? (
+            <div className="space-y-3">
+              <h4 className="font-semibold">{selectedLesson.lesson_code}</h4>
+              <div className="space-y-1.5">
+                <Label>Tên bài học</Label>
+                <Textarea value={draftTitle} onChange={(e) => setDraftTitle(e.target.value)} />
+              </div>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => handleUploadFiles(e.target.files)}
+              />
+
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+                  {uploading ? "Đang tải..." : "Tải tài liệu lên"}
+                </Button>
+                <Button onClick={handleSaveLesson} disabled={isPending}>Lưu</Button>
+                <Button variant="destructive" onClick={handleDeleteLesson} disabled={isPending}>Xóa bài học</Button>
+              </div>
+
+              <div className="rounded-md border border-border p-2">
+                <div className="mb-2 text-sm font-medium">Danh sách tài liệu</div>
+                {normalizeLessonMaterialRows(selectedLesson.materials).length === 0 ? (
+                  <div className="text-sm text-muted-foreground">Chưa có tài liệu.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {normalizeLessonMaterialRows(selectedLesson.materials).map((m, idx) => (
+                      <div key={`${m.name}-${idx}`} className="flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          className="truncate text-left text-sm text-primary underline"
+                          onClick={() => window.open(m.url, "_blank")}
+                        >
+                          {m.name}
+                        </button>
+                        <div className="flex items-center gap-1">
+                          <Button type="button" size="sm" variant="outline" onClick={() => window.open(m.url, "_blank")}>Mở</Button>
+                          {m.storage_path && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => onRemoveMaterial({ lessonId: selectedLesson.lesson_id, storagePath: m.storage_path! })}
+                            >
+                              Xóa
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground">Chọn một bài học hoặc bấm “+ Thêm” để tạo bài học mới.</div>
+          )}
+
+          {actionError && (
+            <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{actionError}</div>
+          )}
+          {actionSuccess && (
+            <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{actionSuccess}</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function AdminSessionMaterialMappingPanel({
+  lessons,
+  fetchSessions,
+  fetchStats,
+  onUpsertMap,
+}: {
+  lessons: HskLessonItem[];
+  fetchSessions: (params: any) => Promise<any[]>;
+  fetchStats: (params: any) => Promise<any>;
+  onUpsertMap: (payload: { classId: string; sessionDate: string; lessonId?: string | null }) => Promise<any>;
+}) {
+  const [q, setQ] = useState("");
+  const [hskLevel, setHskLevel] = useState<string>("all");
+  const [rows, setRows] = useState<any[]>([]);
+  const [stats, setStats] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const reload = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const levelNumber = hskLevel === "all" ? undefined : Number(hskLevel);
+      const [sessionRows, statsRows] = await Promise.all([
+        fetchSessions({ q, hskLevel: levelNumber }),
+        fetchStats({ hskLevel: levelNumber }),
+      ]);
+      setRows(sessionRows ?? []);
+      setStats(statsRows ?? null);
+    } catch (e: any) {
+      setRows([]);
+      setStats(null);
+      setError(e?.message ?? "Không thể tải dữ liệu map tài liệu.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    reload();
+  }, [hskLevel]);
+
+  const lessonOptions = useMemo(() => {
+    const all = (lessons ?? []).map((x: any) => ({
+      id: x.lesson_id,
+      code: x.lesson_code,
+      title: x.lesson_title,
+      level: Number(x.hsk_level ?? 0),
+    }));
+    return all.sort((a, b) => a.code.localeCompare(b.code));
+  }, [lessons]);
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-border bg-card p-4">
+        <div className="grid gap-3 lg:grid-cols-[1fr_auto_auto] lg:items-end">
+          <div className="space-y-1.5">
+            <Label>Tìm kiếm buổi học</Label>
+            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nhập mã lớp, tên lớp, mã bài..." />
+          </div>
+          <div className="space-y-1.5">
+            <Label>HSK</Label>
+            <Select value={hskLevel} onValueChange={setHskLevel}>
+              <SelectTrigger className="w-[160px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tất cả</SelectItem>
+                {[1,2,3,4,5,6,7,8,9].map((lv) => (
+                  <SelectItem key={lv} value={String(lv)}>{`HSK${lv}`}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button onClick={reload} disabled={loading}>{loading ? "Đang tải..." : "Lọc"}</Button>
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-lg border border-border bg-card p-3">
+          <div className="text-xs text-muted-foreground">Tổng lớp</div>
+          <div className="text-lg font-semibold">{stats?.total_classes ?? 0}</div>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-3">
+          <div className="text-xs text-muted-foreground">Tổng buổi</div>
+          <div className="text-lg font-semibold">{stats?.total_sessions ?? 0}</div>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-3">
+          <div className="text-xs text-muted-foreground">Đã map</div>
+          <div className="text-lg font-semibold text-emerald-700">{stats?.mapped_sessions ?? 0}</div>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-3">
+          <div className="text-xs text-muted-foreground">Chưa map</div>
+          <div className="text-lg font-semibold text-amber-700">{stats?.unmapped_sessions ?? 0}</div>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-4">
+        {error && <div className="mb-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div>}
+        <div className="overflow-x-auto">
+          <Table className="min-w-[980px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Mã lớp</TableHead>
+                <TableHead>Tên lớp</TableHead>
+                <TableHead>HSK</TableHead>
+                <TableHead>Buổi</TableHead>
+                <TableHead>Thời gian</TableHead>
+                <TableHead>Map bài học</TableHead>
+                <TableHead>Tình trạng</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(rows ?? []).length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center text-muted-foreground">Không có dữ liệu buổi học.</TableCell>
+                </TableRow>
+              ) : (
+                rows.map((row) => {
+                  const opts = lessonOptions.filter((x: { id: string; code: string; title: string; level: number }) => !row.hsk_level || x.level === Number(row.hsk_level));
+                  const currentValue = row.lesson_id ? String(row.lesson_id) : "__none";
+                  return (
+                    <TableRow key={`${row.class_id}-${row.session_date}`}>
+                      <TableCell className="font-mono text-xs">{row.class_id}</TableCell>
+                      <TableCell>{row.class_name ?? "—"}</TableCell>
+                      <TableCell>{row.hsk_level ? `HSK${row.hsk_level}` : "—"}</TableCell>
+                      <TableCell>Bài {row.lesson_order ?? "—"}</TableCell>
+                      <TableCell className="text-xs">{row.session_date ? new Date(row.session_date).toLocaleString("vi-VN") : "—"}</TableCell>
+                      <TableCell>
+                        <Select
+                          value={currentValue}
+                          onValueChange={async (value) => {
+                            await onUpsertMap({
+                              classId: row.class_id,
+                              sessionDate: row.session_date,
+                              lessonId: value === "__none" ? null : value,
+                            });
+                            reload();
+                          }}
+                        >
+                          <SelectTrigger className="w-[250px]">
+                            <SelectValue placeholder="Chọn bài học" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none">-- Bỏ map --</SelectItem>
+                            {opts.map((opt: { id: string; code: string; title: string; level: number }) => (
+                              <SelectItem key={opt.id} value={opt.id}>{opt.code} — {opt.title}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell>
+                        {row.is_mapped ? (
+                          <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">Đã map</span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">Chờ map</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </div>
     </div>
   );
 }

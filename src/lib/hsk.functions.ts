@@ -54,6 +54,62 @@ const assertAdminOrCareContext = async (context: any) => {
   return me;
 };
 
+const HSK_MATERIALS_BUCKET = "hsk-materials";
+
+const toSessionKey = (classId?: string | null, sessionDate?: string | null) => {
+  const ts = sessionDate ? new Date(sessionDate).getTime() : NaN;
+  return `${classId ?? ""}|${Number.isFinite(ts) ? ts : sessionDate ?? ""}`;
+};
+
+const extractHskLevel = (classId?: string | null, courseId?: string | null) => {
+  const source = `${String(classId ?? "")} ${String(courseId ?? "")}`;
+  const m = source.match(/HSK\s*([1-9])/i);
+  return m ? Number(m[1]) : null;
+};
+
+const normalizeLessonMaterials = (raw: any) => {
+  const rows = Array.isArray(raw) ? raw : [];
+  return rows
+    .filter((x: any) => x && (x.url || x.name))
+    .map((x: any) => ({
+      name: String(x.name ?? "Tài liệu"),
+      url: String(x.url ?? ""),
+      storage_path: x.storage_path ? String(x.storage_path) : null,
+      mime_type: x.mime_type ? String(x.mime_type) : null,
+      size: Number.isFinite(Number(x.size)) ? Number(x.size) : null,
+      uploaded_at: x.uploaded_at ? String(x.uploaded_at) : null,
+    }))
+    .filter((x: any) => Boolean(x.url));
+};
+
+const getFirstLessonMaterialUrl = (raw: any) => {
+  const list = normalizeLessonMaterials(raw);
+  return list[0]?.url ?? "";
+};
+
+const sanitizeFileName = (name: string) =>
+  String(name ?? "file")
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-zA-Z0-9._-]/g, "_")
+    .slice(0, 160);
+
+const decodeBase64ToBytes = (base64: string): Uint8Array => {
+  const raw = String(base64 ?? "").trim();
+  if (!raw) return new Uint8Array();
+
+  if (typeof Buffer !== "undefined") {
+    return new Uint8Array(Buffer.from(raw, "base64"));
+  }
+
+  const binary = atob(raw);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+};
+
 // ---------- Bookings ----------
 
 export const claimSlot = createServerFn({ method: "POST" })
@@ -372,6 +428,34 @@ export const getMe = createServerFn({ method: "GET" })
     };
   });
 
+const getSessionMaterialUrlMap = async (classIds: string[]) => {
+  const cleanClassIds = Array.from(new Set((classIds ?? []).map((x) => String(x ?? "").trim()).filter(Boolean)));
+  const out = new Map<string, string>();
+  if (cleanClassIds.length === 0) return out;
+
+  const { data, error } = await supabaseAdmin
+    .from("class_session_material_map")
+    .select("class_id, session_date, lesson_id, hsk_lessons ( lesson_id, materials )")
+    .in("class_id", cleanClassIds);
+
+  if (error) {
+    const msg = String(error.message ?? error);
+    if (msg.includes("Could not find the table") || msg.includes("does not exist") || msg.includes("42P01")) {
+      return out;
+    }
+    throw new Error(error.message);
+  }
+
+  for (const row of data ?? []) {
+    const url = getFirstLessonMaterialUrl((row as any)?.hsk_lessons?.materials);
+    if (!url) continue;
+    const key = toSessionKey((row as any).class_id, (row as any).session_date);
+    if (!out.has(key)) out.set(key, url);
+  }
+
+  return out;
+};
+
 export const getStudentDashboard = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -475,11 +559,6 @@ export const getStudentDashboard = createServerFn({ method: "GET" })
       studentKeys.includes(String(r.student_id ?? "").trim()),
     );
 
-    const toSessionKey = (classId?: string | null, sessionDate?: string | null) => {
-      const ts = sessionDate ? new Date(sessionDate).getTime() : NaN;
-      return `${classId ?? ""}|${Number.isFinite(ts) ? ts : sessionDate ?? ""}`;
-    };
-
     const gradeNoteBySession = new Map<string, string>();
     for (const row of gradeRows) {
       const note = String((row as any).general_comment ?? "").trim();
@@ -508,12 +587,24 @@ export const getStudentDashboard = createServerFn({ method: "GET" })
       : { data: [], error: null };
     if (users.error) throw new Error(users.error.message);
 
+    const classIdsForMaterialMap = Array.from(
+      new Set([
+        ...(bookings.data ?? []).map((b: any) => String(b.class_id ?? "").trim()).filter(Boolean),
+        ...enrollmentsRows.map((r: any) => String(r?.class_id ?? "").trim()).filter(Boolean),
+      ]),
+    );
+    const sessionMaterialMap = await getSessionMaterialUrlMap(classIdsForMaterialMap);
+
     const nameMap = new Map((users.data ?? []).map((u: any) => [u.specific_id, u.full_name]));
     const teacherCodeMap = new Map((users.data ?? []).map((u: any) => [u.specific_id, u.staff_code]));
     return {
       progress: progress.data ?? [],
       bookings: (bookings.data ?? []).map((b: any) => ({
         ...b,
+        material_url:
+          String((b as any).material_url ?? "").trim() ||
+          sessionMaterialMap.get(toSessionKey(b.class_id, b.session_date)) ||
+          null,
         teacher_name: b.teacher_id ? nameMap.get(b.teacher_id) ?? null : null,
         teacher_staff_code: b.teacher_id ? teacherCodeMap.get(b.teacher_id) ?? null : null,
         teacher_note:
@@ -724,7 +815,9 @@ export const getTeacherDashboard = createServerFn({ method: "GET" })
       }
     }
 
-    const classIds = Array.from(new Set(classes.map((c: any) => c.class_id).filter(Boolean)));
+    const classIds: string[] = Array.from(
+      new Set<string>(classes.map((c: any) => String(c.class_id ?? "").trim()).filter(Boolean) as string[]),
+    );
 
     let classEnrollments: any[] = [];
     if (classIds.length > 0) {
@@ -907,6 +1000,8 @@ export const getTeacherDashboard = createServerFn({ method: "GET" })
       String(a.session_date ?? "").localeCompare(String(b.session_date ?? "")),
     );
 
+    const sessionMaterialMap = await getSessionMaterialUrlMap(classIds);
+
     const classStudentCountMap = new Map<string, number>();
     for (const [classId, rows] of enrollmentsByClass.entries()) {
       const unique = new Set((rows ?? []).map((r: any) => String(r.student_id ?? "")).filter(Boolean));
@@ -984,8 +1079,10 @@ export const getTeacherDashboard = createServerFn({ method: "GET" })
       const required = requiredCountMap.get(key) ?? 0;
       const attendanceCount = attendanceCountMap.get(key) ?? 0;
       const gradingCount = gradingCountMap.get(key) ?? 0;
+      const mappedMaterialUrl = sessionMaterialMap.get(toSessionKey(row?.class_id, row?.session_date)) ?? "";
       return {
         ...row,
+        material_url: String((row as any).material_url ?? "").trim() || mappedMaterialUrl || null,
         attendance_done: required > 0 ? attendanceCount >= required : attendanceCount > 0,
         grading_done: required > 0 ? gradingCount >= required : gradingCount > 0,
       };
@@ -2038,6 +2135,17 @@ export const createClassAdmin = createServerFn({ method: "POST" })
         maxStudents: z.number().int().min(1).default(10),
         teacherId: z.string().optional(),
         roomLink: z.string().optional(),
+        classMaterials: z
+          .array(
+            z.object({
+              name: z.string().min(1),
+              url: z.string().min(1),
+              mimeType: z.string().optional().nullable(),
+              size: z.number().optional().nullable(),
+              uploadedAt: z.string().optional().nullable(),
+            }),
+          )
+          .optional(),
         status: z.enum(["pending", "active", "completed"]).default("pending"),
       })
       .parse(d),
@@ -2057,6 +2165,7 @@ export const createClassAdmin = createServerFn({ method: "POST" })
       max_students: data.maxStudents,
       teacher_id: data.teacherId ?? null,
       room_link: data.roomLink ?? null,
+      class_materials: data.classMaterials ?? [],
       status: data.status,
     };
     const { data: row, error } = await supabaseAdmin.from("classes").insert(payload).select().single();
@@ -2089,6 +2198,7 @@ export const updateClassAdmin = createServerFn({ method: "POST" })
       "max_students",
       "teacher_id",
       "room_link",
+      "class_materials",
       "status",
     ];
     for (const k of Object.keys(data.updates ?? {})) {
@@ -2239,6 +2349,481 @@ export const createClassEventAdmin = createServerFn({ method: "POST" })
       throw new Error(error.message);
     }
     return { ok: true };
+  });
+
+// ---------- Lesson preparation + session material mapping ----------
+
+export const listHskLessonsAdmin = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        hskLevel: z.number().int().min(1).max(9).optional(),
+      })
+      .parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdminContext(context);
+    let query = supabaseAdmin
+      .from("hsk_lessons")
+      .select("lesson_id, lesson_code, hsk_level, lesson_no, lesson_title, materials, created_at, updated_at")
+      .order("hsk_level", { ascending: true })
+      .order("lesson_no", { ascending: true });
+
+    if (data.hskLevel) query = query.eq("hsk_level", data.hskLevel);
+
+    const { data: rows, error } = await query;
+    if (error) throw new Error(error.message);
+    return (rows ?? []).map((r: any) => ({
+      ...r,
+      materials: normalizeLessonMaterials(r.materials),
+    }));
+  });
+
+export const createHskLessonAdmin = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        hskLevel: z.number().int().min(1).max(9),
+        lessonNo: z.number().int().min(1).optional(),
+        lessonTitle: z.string().min(1).max(255),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdminContext(context);
+
+    let lessonNo = data.lessonNo;
+    if (!lessonNo) {
+      const { data: maxRows, error: maxErr } = await supabaseAdmin
+        .from("hsk_lessons")
+        .select("lesson_no")
+        .eq("hsk_level", data.hskLevel)
+        .order("lesson_no", { ascending: false })
+        .limit(1);
+      if (maxErr) throw new Error(maxErr.message);
+      lessonNo = Number(maxRows?.[0]?.lesson_no ?? 0) + 1;
+    }
+
+    const lessonCode = `HSK${data.hskLevel}-B${String(lessonNo).padStart(2, "0")}`;
+    const { data: row, error } = await supabaseAdmin
+      .from("hsk_lessons")
+      .insert({
+        lesson_code: lessonCode,
+        hsk_level: data.hskLevel,
+        lesson_no: lessonNo,
+        lesson_title: data.lessonTitle,
+        materials: [],
+      })
+      .select("lesson_id, lesson_code, hsk_level, lesson_no, lesson_title, materials, created_at, updated_at")
+      .single();
+    if (error) throw new Error(error.message);
+    return { ...row, materials: normalizeLessonMaterials((row as any).materials) };
+  });
+
+export const updateHskLessonAdmin = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        lessonId: z.string().min(1),
+        lessonTitle: z.string().min(1).max(255).optional(),
+        materials: z.array(z.record(z.any())).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdminContext(context);
+    const updates: any = {};
+    if (typeof data.lessonTitle === "string") updates.lesson_title = data.lessonTitle;
+    if (Array.isArray(data.materials)) updates.materials = normalizeLessonMaterials(data.materials);
+
+    const { data: row, error } = await supabaseAdmin
+      .from("hsk_lessons")
+      .update(updates)
+      .eq("lesson_id", data.lessonId)
+      .select("lesson_id, lesson_code, hsk_level, lesson_no, lesson_title, materials, created_at, updated_at")
+      .single();
+    if (error) throw new Error(error.message);
+    return { ...row, materials: normalizeLessonMaterials((row as any).materials) };
+  });
+
+export const deleteHskLessonAdmin = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) => z.object({ lessonId: z.string().min(1) }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdminContext(context);
+
+    const { data: current, error: currentErr } = await supabaseAdmin
+      .from("hsk_lessons")
+      .select("materials")
+      .eq("lesson_id", data.lessonId)
+      .maybeSingle();
+    if (currentErr) throw new Error(currentErr.message);
+
+    const paths = normalizeLessonMaterials(current?.materials)
+      .map((m: any) => String(m.storage_path ?? "").trim())
+      .filter(Boolean);
+    if (paths.length > 0) {
+      await supabaseAdmin.storage.from(HSK_MATERIALS_BUCKET).remove(paths);
+    }
+
+    const { error } = await supabaseAdmin.from("hsk_lessons").delete().eq("lesson_id", data.lessonId);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export const uploadHskLessonMaterialAdmin = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        lessonId: z.string().min(1),
+        fileName: z.string().min(1).max(255),
+        contentType: z.string().min(1).max(120).optional(),
+        base64: z.string().min(1),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdminContext(context);
+
+    const { data: lesson, error: lessonErr } = await supabaseAdmin
+      .from("hsk_lessons")
+      .select("lesson_id, hsk_level, lesson_no, materials")
+      .eq("lesson_id", data.lessonId)
+      .maybeSingle();
+    if (lessonErr) throw new Error(lessonErr.message);
+    if (!lesson) throw new Error("Không tìm thấy bài học.");
+
+    const bytes = decodeBase64ToBytes(data.base64);
+    if (!bytes?.length) throw new Error("Nội dung file rỗng.");
+
+    const safeName = sanitizeFileName(data.fileName);
+    const storagePath = `hsk${lesson.hsk_level}/lesson-${String(lesson.lesson_no).padStart(2, "0")}/${Date.now()}-${safeName}`;
+    const uploadRes = await supabaseAdmin.storage.from(HSK_MATERIALS_BUCKET).upload(storagePath, bytes, {
+      cacheControl: "3600",
+      upsert: false,
+      contentType: data.contentType ?? "application/octet-stream",
+    });
+    if (uploadRes.error) throw new Error(uploadRes.error.message);
+
+    const publicUrl = supabaseAdmin.storage.from(HSK_MATERIALS_BUCKET).getPublicUrl(storagePath).data.publicUrl;
+    const currentMaterials = normalizeLessonMaterials(lesson.materials);
+    const nextMaterials = [
+      ...currentMaterials,
+      {
+        name: data.fileName,
+        url: publicUrl,
+        storage_path: storagePath,
+        mime_type: data.contentType ?? null,
+        size: bytes.length,
+        uploaded_at: new Date().toISOString(),
+      },
+    ];
+
+    const { data: row, error } = await supabaseAdmin
+      .from("hsk_lessons")
+      .update({ materials: nextMaterials })
+      .eq("lesson_id", data.lessonId)
+      .select("lesson_id, lesson_code, hsk_level, lesson_no, lesson_title, materials, created_at, updated_at")
+      .single();
+    if (error) throw new Error(error.message);
+
+    return {
+      lesson: {
+        ...row,
+        materials: normalizeLessonMaterials((row as any).materials),
+      },
+      uploaded: {
+        name: data.fileName,
+        url: publicUrl,
+        storage_path: storagePath,
+      },
+    };
+  });
+
+export const removeHskLessonMaterialAdmin = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        lessonId: z.string().min(1),
+        storagePath: z.string().min(1),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdminContext(context);
+    const { data: lesson, error: lessonErr } = await supabaseAdmin
+      .from("hsk_lessons")
+      .select("materials")
+      .eq("lesson_id", data.lessonId)
+      .maybeSingle();
+    if (lessonErr) throw new Error(lessonErr.message);
+    if (!lesson) throw new Error("Không tìm thấy bài học.");
+
+    await supabaseAdmin.storage.from(HSK_MATERIALS_BUCKET).remove([data.storagePath]);
+    const nextMaterials = normalizeLessonMaterials(lesson.materials).filter(
+      (m: any) => String(m.storage_path ?? "") !== String(data.storagePath),
+    );
+
+    const { data: row, error } = await supabaseAdmin
+      .from("hsk_lessons")
+      .update({ materials: nextMaterials })
+      .eq("lesson_id", data.lessonId)
+      .select("lesson_id, lesson_code, hsk_level, lesson_no, lesson_title, materials, created_at, updated_at")
+      .single();
+    if (error) throw new Error(error.message);
+    return { ...row, materials: normalizeLessonMaterials((row as any).materials) };
+  });
+
+export const listClassSessionsForMaterialMapAdmin = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        q: z.string().optional(),
+        hskLevel: z.number().int().min(1).max(9).optional(),
+        classId: z.string().optional(),
+        fromDate: z.string().optional(),
+        toDate: z.string().optional(),
+        limit: z.number().int().min(20).max(3000).optional(),
+      })
+      .parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdminContext(context);
+
+    const { data: classes, error: classesErr } = await supabaseAdmin
+      .from("classes")
+      .select("class_id, class_name, course_id, start_date, start_time, schedule_days, total_lessons, status")
+      .order("class_id", { ascending: true });
+    if (classesErr) throw new Error(classesErr.message);
+
+    const parseDateOnly = (value?: string | null) => {
+      const raw = String(value ?? "").trim();
+      if (!raw) return new Date();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return new Date(`${raw}T00:00:00`);
+      const d = new Date(raw);
+      return Number.isNaN(d.getTime()) ? new Date() : d;
+    };
+
+    const normalizeTimeValue = (value?: string | null) => {
+      const raw = String(value ?? "").trim();
+      if (!raw) return "00:00:00";
+      const m = raw.match(/^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/);
+      if (!m) return "00:00:00";
+      return `${String(Number(m[1])).padStart(2, "0")}:${String(Number(m[2])).padStart(2, "0")}:${String(Number(m[3] ?? 0)).padStart(2, "0")}`;
+    };
+
+    const makeIsoLike = (date: Date, hhmmss?: string | null) => {
+      const yyyy = date.getFullYear();
+      const mm = String(date.getMonth() + 1).padStart(2, "0");
+      const dd = String(date.getDate()).padStart(2, "0");
+      return `${yyyy}-${mm}-${dd}T${normalizeTimeValue(hhmmss)}`;
+    };
+
+    const normalizeScheduleDays = (raw: any): Set<number> => {
+      const src = Array.isArray(raw)
+        ? raw.map((v: any) => Number(v)).filter((v: number) => !Number.isNaN(v))
+        : [];
+      const out = new Set<number>();
+      for (const n of src) {
+        if (n >= 0 && n <= 6) out.add(n);
+        if (n >= 1 && n <= 7) out.add(n % 7);
+        if (n >= 2 && n <= 8) out.add((n - 1) % 7);
+      }
+      return out;
+    };
+
+    const generated: any[] = [];
+    for (const cls of classes ?? []) {
+      const classId = String((cls as any).class_id ?? "").trim();
+      if (!classId) continue;
+
+      if (data.classId && classId !== data.classId) continue;
+      const level = extractHskLevel((cls as any).class_id, (cls as any).course_id);
+      if (data.hskLevel && level !== data.hskLevel) continue;
+
+      const totalLessons = Math.max(1, Number((cls as any).total_lessons ?? 15));
+      const baseDate = parseDateOnly((cls as any).start_date ?? null);
+      const scheduleSet = normalizeScheduleDays((cls as any).schedule_days);
+      const useAnyDay = scheduleSet.size === 0;
+
+      const lessonDates: Date[] = [];
+      const cursor = new Date(baseDate);
+      cursor.setHours(0, 0, 0, 0);
+      let guard = 0;
+      while (lessonDates.length < totalLessons && guard < 1200) {
+        guard += 1;
+        const weekday = cursor.getDay();
+        if (useAnyDay || scheduleSet.has(weekday)) lessonDates.push(new Date(cursor));
+        cursor.setDate(cursor.getDate() + 1);
+      }
+
+      for (let i = 0; i < lessonDates.length; i += 1) {
+        const d0 = lessonDates[i];
+        const sessionDate = makeIsoLike(d0, (cls as any).start_time ?? "00:00:00");
+        generated.push({
+          class_id: classId,
+          class_name: (cls as any).class_name ?? classId,
+          status: (cls as any).status ?? null,
+          hsk_level: level,
+          lesson_order: i + 1,
+          session_date: sessionDate,
+        });
+      }
+    }
+
+    const classIds = Array.from(new Set(generated.map((x: any) => x.class_id).filter(Boolean)));
+
+    let mapRows: any[] = [];
+    if (classIds.length > 0) {
+      let query = supabaseAdmin
+        .from("class_session_material_map")
+        .select("class_id, session_date, lesson_id, hsk_lessons ( lesson_id, lesson_code, lesson_title, hsk_level, lesson_no, materials )")
+        .in("class_id", classIds);
+
+      if (data.fromDate) query = query.gte("session_date", `${data.fromDate}T00:00:00`);
+      if (data.toDate) query = query.lte("session_date", `${data.toDate}T23:59:59`);
+
+      const { data: rows, error } = await query;
+      if (error) throw new Error(error.message);
+      mapRows = rows ?? [];
+    }
+
+    const mappedBySession = new Map<string, any>();
+    for (const row of mapRows) {
+      mappedBySession.set(toSessionKey((row as any).class_id, (row as any).session_date), row);
+    }
+
+    const q = String(data.q ?? "").trim().toLowerCase();
+    const fromTs = data.fromDate ? new Date(`${data.fromDate}T00:00:00`).getTime() : NaN;
+    const toTs = data.toDate ? new Date(`${data.toDate}T23:59:59`).getTime() : NaN;
+
+    const result = generated
+      .filter((row: any) => {
+        const ts = new Date(row.session_date).getTime();
+        if (!Number.isNaN(fromTs) && ts < fromTs) return false;
+        if (!Number.isNaN(toTs) && ts > toTs) return false;
+
+        const mapped = mappedBySession.get(toSessionKey(row.class_id, row.session_date));
+        const lessonCode = String((mapped as any)?.hsk_lessons?.lesson_code ?? "").toLowerCase();
+        const lessonTitle = String((mapped as any)?.hsk_lessons?.lesson_title ?? "").toLowerCase();
+        if (!q) return true;
+        return (
+          String(row.class_id ?? "").toLowerCase().includes(q) ||
+          String(row.class_name ?? "").toLowerCase().includes(q) ||
+          String(row.session_date ?? "").toLowerCase().includes(q) ||
+          lessonCode.includes(q) ||
+          lessonTitle.includes(q)
+        );
+      })
+      .map((row: any) => {
+        const mapped = mappedBySession.get(toSessionKey(row.class_id, row.session_date));
+        const lesson = (mapped as any)?.hsk_lessons ?? null;
+        const materials = normalizeLessonMaterials(lesson?.materials);
+        return {
+          ...row,
+          map_id: (mapped as any)?.map_id ?? null,
+          lesson_id: lesson?.lesson_id ?? (mapped as any)?.lesson_id ?? null,
+          lesson_code: lesson?.lesson_code ?? null,
+          lesson_title: lesson?.lesson_title ?? null,
+          materials_count: materials.length,
+          material_url: getFirstLessonMaterialUrl(lesson?.materials) || null,
+          is_mapped: Boolean((mapped as any)?.lesson_id),
+        };
+      })
+      .sort((a: any, b: any) => String(a.session_date).localeCompare(String(b.session_date)));
+
+    const limit = Number(data.limit ?? 1200);
+    return result.slice(0, limit);
+  });
+
+export const upsertClassSessionMaterialMapAdmin = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        classId: z.string().min(1),
+        sessionDate: z.string().min(1),
+        lessonId: z.string().optional().nullable(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const me = await assertAdminContext(context);
+
+    const cleanLessonId = String(data.lessonId ?? "").trim();
+    if (!cleanLessonId) {
+      const { error: delErr } = await supabaseAdmin
+        .from("class_session_material_map")
+        .delete()
+        .eq("class_id", data.classId)
+        .eq("session_date", data.sessionDate);
+      if (delErr) throw new Error(delErr.message);
+      return { ok: true, deleted: true };
+    }
+
+    const payload = {
+      class_id: data.classId,
+      session_date: data.sessionDate,
+      lesson_id: cleanLessonId,
+      mapped_by: context.userId ?? (me as any).id ?? null,
+    };
+
+    const { data: row, error } = await supabaseAdmin
+      .from("class_session_material_map")
+      .upsert(payload, { onConflict: "class_id,session_date" })
+      .select("map_id, class_id, session_date, lesson_id, updated_at")
+      .single();
+    if (error) throw new Error(error.message);
+    return row;
+  });
+
+export const getClassSessionMaterialMapStatsAdmin = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        hskLevel: z.number().int().min(1).max(9).optional(),
+      })
+      .parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdminContext(context);
+
+    const { data: classes, error: classErr } = await supabaseAdmin
+      .from("classes")
+      .select("class_id, course_id, total_lessons");
+    if (classErr) throw new Error(classErr.message);
+
+    const filteredClasses = (classes ?? []).filter((c: any) => {
+      if (!data.hskLevel) return true;
+      return extractHskLevel(c.class_id, c.course_id) === data.hskLevel;
+    });
+
+    const classIds = filteredClasses.map((c: any) => String(c.class_id ?? "").trim()).filter(Boolean);
+    const totalSessions = filteredClasses.reduce((sum: number, c: any) => sum + Math.max(1, Number(c.total_lessons ?? 15)), 0);
+
+    let mappedSessions = 0;
+    if (classIds.length > 0) {
+      const { count, error } = await supabaseAdmin
+        .from("class_session_material_map")
+        .select("map_id", { count: "exact", head: true })
+        .in("class_id", classIds);
+      if (error) throw new Error(error.message);
+      mappedSessions = Number(count ?? 0);
+    }
+
+    return {
+      total_classes: classIds.length,
+      total_sessions: totalSessions,
+      mapped_sessions: mappedSessions,
+      unmapped_sessions: Math.max(0, totalSessions - mappedSessions),
+    };
   });
 
 // ---------- Customer Care directory ----------

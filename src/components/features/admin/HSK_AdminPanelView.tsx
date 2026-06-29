@@ -2,8 +2,8 @@ import { useMemo, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { assignStudentToOfflineClass, createCareUser, getAuditLogs, getTeacherAnalytics, getAllUsersAdmin, updateUserAdmin, deleteUserAdmin, getAllClassesAdmin, createClassAdmin, updateClassAdmin, deleteClassAdmin, getClassDetailsAdmin, getClassEnrollmentsAdmin, getStudentEnrollmentsAdmin, getStudentSuggestionsAdmin, removeStudentFromClassAdmin, getClassEventsAdmin } from "@/lib/hsk.functions";
-import { AdminAuditLogsPanel, AdminMappingPanel, AdminTeacherAnalyticsPanel, AdminUserManagementPanel, AdminClassesPanel } from "./HSK_AdminPanelUi";
+import { assignStudentToOfflineClass, createCareUser, getAuditLogs, getTeacherAnalytics, getAllUsersAdmin, updateUserAdmin, deleteUserAdmin, getAllClassesAdmin, createClassAdmin, updateClassAdmin, deleteClassAdmin, getClassDetailsAdmin, getClassEnrollmentsAdmin, getStudentEnrollmentsAdmin, getStudentSuggestionsAdmin, removeStudentFromClassAdmin, getClassEventsAdmin, listHskLessonsAdmin, createHskLessonAdmin, updateHskLessonAdmin, deleteHskLessonAdmin, uploadHskLessonMaterialAdmin, removeHskLessonMaterialAdmin, listClassSessionsForMaterialMapAdmin, upsertClassSessionMaterialMapAdmin, getClassSessionMaterialMapStatsAdmin } from "@/lib/hsk.functions";
+import { AdminAuditLogsPanel, AdminMappingPanel, AdminTeacherAnalyticsPanel, AdminUserManagementPanel, AdminClassesPanel, AdminLessonPrepPanel, AdminSessionMaterialMappingPanel } from "./HSK_AdminPanelUi";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,15 @@ export function HSK_AdminPanelView() {
   const getStudentSuggestionsFn = useServerFn(getStudentSuggestionsAdmin);
   const removeStudentFn = useServerFn(removeStudentFromClassAdmin);
   const getClassEventsFn = useServerFn(getClassEventsAdmin);
+  const listHskLessonsFn = useServerFn(listHskLessonsAdmin);
+  const createHskLessonFn = useServerFn(createHskLessonAdmin);
+  const updateHskLessonFn = useServerFn(updateHskLessonAdmin);
+  const deleteHskLessonFn = useServerFn(deleteHskLessonAdmin);
+  const uploadHskLessonMaterialFn = useServerFn(uploadHskLessonMaterialAdmin);
+  const removeHskLessonMaterialFn = useServerFn(removeHskLessonMaterialAdmin);
+  const listClassSessionsForMapFn = useServerFn(listClassSessionsForMaterialMapAdmin);
+  const upsertClassSessionMapFn = useServerFn(upsertClassSessionMaterialMapAdmin);
+  const getClassSessionMapStatsFn = useServerFn(getClassSessionMaterialMapStatsAdmin);
 
   const [studentId, setStudentId] = useState("");
   const [classId, setClassId] = useState("");
@@ -204,6 +213,7 @@ export function HSK_AdminPanelView() {
   const deleteClassFn = useServerFn(deleteClassAdmin);
 
   const classesQuery = useQuery({ queryKey: ["admin-classes"], queryFn: () => getAllClassesFn(), enabled: Boolean(!loading && user) });
+  const lessonsQuery = useQuery({ queryKey: ["admin-hsk-lessons"], queryFn: () => listHskLessonsFn({ data: {} }), enabled: Boolean(!loading && user) });
 
   const createClassMutation = useMutation({
     mutationFn: (payload: any) => createClassFn({ data: payload }),
@@ -226,6 +236,27 @@ export function HSK_AdminPanelView() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-classes"] });
       qc.invalidateQueries({ queryKey: ["audit"] });
+    },
+  });
+
+  const createLessonMutation = useMutation({
+    mutationFn: (payload: any) => createHskLessonFn({ data: payload }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-hsk-lessons"] });
+    },
+  });
+
+  const updateLessonMutation = useMutation({
+    mutationFn: (payload: any) => updateHskLessonFn({ data: payload }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-hsk-lessons"] });
+    },
+  });
+
+  const deleteLessonMutation = useMutation({
+    mutationFn: (payload: any) => deleteHskLessonFn({ data: payload }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-hsk-lessons"] });
     },
   });
 
@@ -255,6 +286,8 @@ export function HSK_AdminPanelView() {
           <TabsTrigger value="mapping">Sắp xếp lớp</TabsTrigger>
           <TabsTrigger value="create-user">Tạo tài khoản</TabsTrigger>
           <TabsTrigger value="classes">Tạo lớp học</TabsTrigger>
+          <TabsTrigger value="lesson-prep">Chuẩn bị tài liệu</TabsTrigger>
+          <TabsTrigger value="session-material-map">Map tài liệu buổi học</TabsTrigger>
           <TabsTrigger value="teachers">Giáo viên & đánh giá</TabsTrigger>
           <TabsTrigger value="audit">Audit logs</TabsTrigger>
         </TabsList>
@@ -445,6 +478,25 @@ export function HSK_AdminPanelView() {
             onCreateClass={(payload: any) => createClassMutation.mutate(payload)}
             onUpdateClass={(payload: any) => updateClassMutation.mutate(payload)}
             onDeleteClass={(id: string) => deleteClassMutation.mutate({ id })}
+          />
+        </TabsContent>
+        <TabsContent value="lesson-prep" className="mt-6">
+          <AdminLessonPrepPanel
+            lessons={lessonsQuery.data ?? []}
+            isPending={createLessonMutation.isPending || updateLessonMutation.isPending || deleteLessonMutation.isPending}
+            onCreateLesson={(payload: any) => createLessonMutation.mutateAsync(payload)}
+            onUpdateLesson={(payload: any) => updateLessonMutation.mutateAsync(payload)}
+            onDeleteLesson={(lessonId: string) => deleteLessonMutation.mutateAsync({ lessonId })}
+            onUploadMaterial={(payload: any) => uploadHskLessonMaterialFn({ data: payload }).then(() => qc.invalidateQueries({ queryKey: ["admin-hsk-lessons"] }))}
+            onRemoveMaterial={(payload: any) => removeHskLessonMaterialFn({ data: payload }).then(() => qc.invalidateQueries({ queryKey: ["admin-hsk-lessons"] }))}
+          />
+        </TabsContent>
+        <TabsContent value="session-material-map" className="mt-6">
+          <AdminSessionMaterialMappingPanel
+            lessons={lessonsQuery.data ?? []}
+            fetchSessions={(params: any) => listClassSessionsForMapFn({ data: params })}
+            fetchStats={(params: any) => getClassSessionMapStatsFn({ data: params })}
+            onUpsertMap={(payload: any) => upsertClassSessionMapFn({ data: payload })}
           />
         </TabsContent>
       </Tabs>

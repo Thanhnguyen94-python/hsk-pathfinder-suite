@@ -33,6 +33,9 @@ Bảng lịch học của tôi là nơi tập trung các thông tin chi tiết v
     *   Học viên hủy **trước 6 giờ** (Hủy hợp lệ - `cancelled_valid`): Được hoàn trả lại số buổi học vào gói cước.
     *   Học viên hủy **dưới 6 giờ** (Hủy muộn - `cancelled_late`): Sẽ bị mất buổi học đó và không được hoàn trả.
 *   **Đánh giá giáo viên**: Đối với các buổi học đã kết thúc (trong quá khứ), học viên có thể bấm nút **Đánh giá** để mở `RatingDialog`, gửi số sao và bình luận về giáo viên đó.
+*   **Tài liệu buổi học (mới)**:
+    *   Cột **Tài liệu** ưu tiên lấy theo map buổi học từ bảng `class_session_material_map` (khóa `class_id + session_date`).
+    *   Map này trỏ tới bài học trong `hsk_lessons` để lấy danh sách tài liệu và hiển thị link mở tài liệu ổn định.
 
 ### d. Đóng băng & Kích hoạt lại khóa học (Freeze/Unfreeze)
 *   Học viên có thể chủ động tạm dừng (bảo lưu) tiến trình khóa học của mình bằng cách nhấn nút **"Bảo lưu"** trên thẻ tiến độ.
@@ -112,4 +115,11 @@ sequenceDiagram
   * Tổ chức lại toàn bộ layout hiển thị thành 5 tab.
   * Thêm state lọc lớp (`selectedClassId`) cho tab Lớp học.
   * Áp dụng lọc dữ liệu `bookingsForTable` theo lớp trước khi truyền vào `BookingsTable`.
+
+## 6. Cập nhật dữ liệu tài liệu (29/06/2026)
+
+- File backend: [src/lib/hsk.functions.ts](src/lib/hsk.functions.ts)
+    - `getStudentDashboard` đã được bổ sung resolve tài liệu theo map buổi học (`class_session_material_map` + `hsk_lessons`).
+- UI file: [src/components/features/student/HSK_StudentDashboardUi.tsx](src/components/features/student/HSK_StudentDashboardUi.tsx)
+    - Không đổi cấu trúc cột; cột **Tài liệu** tự động nhận dữ liệu map mới qua `material_url`.
 
