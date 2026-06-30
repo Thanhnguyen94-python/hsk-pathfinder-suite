@@ -25,7 +25,7 @@ const getCurrentUserRow = async (context: any) => {
 
   const { data, error } = await supabaseAdmin
     .from("users")
-    .select("id, role, specific_id, full_name, email, status, student_account_type")
+    .select("id, role, specific_id, full_name, email, status, student_account_type, avatar_url")
     .eq("id", context.userId)
     .maybeSingle();
 
@@ -55,6 +55,7 @@ const assertAdminOrCareContext = async (context: any) => {
 };
 
 const HSK_MATERIALS_BUCKET = "hsk-materials";
+const HSK_ACCOUNT_IMAGES_BUCKET = "hsk-account-images";
 
 const toSessionKey = (classId?: string | null, sessionDate?: string | null) => {
   const ts = sessionDate ? new Date(sessionDate).getTime() : NaN;
@@ -108,6 +109,37 @@ const decodeBase64ToBytes = (base64: string): Uint8Array => {
     bytes[i] = binary.charCodeAt(i);
   }
   return bytes;
+};
+
+const uploadAccountImage = async ({
+  userId,
+  fileName,
+  contentType,
+  base64,
+}: {
+  userId: string;
+  fileName: string;
+  contentType: string;
+  base64: string;
+}) => {
+  if (!contentType.startsWith("image/")) {
+    throw new Error("File ảnh tài khoản không hợp lệ.");
+  }
+
+  const bytes = decodeBase64ToBytes(base64);
+  if (!bytes?.length) throw new Error("Nội dung ảnh tài khoản rỗng.");
+  if (bytes.length > 2 * 1024 * 1024) throw new Error("Ảnh tài khoản không được vượt quá 2MB.");
+
+  const extension = sanitizeFileName(fileName).split(".").pop() || "jpg";
+  const storagePath = `${userId}/${Date.now()}.${extension}`;
+  const uploadRes = await supabaseAdmin.storage.from(HSK_ACCOUNT_IMAGES_BUCKET).upload(storagePath, bytes, {
+    cacheControl: "3600",
+    upsert: true,
+    contentType,
+  });
+  if (uploadRes.error) throw new Error(uploadRes.error.message);
+
+  return supabaseAdmin.storage.from(HSK_ACCOUNT_IMAGES_BUCKET).getPublicUrl(storagePath).data.publicUrl;
 };
 
 // ---------- Bookings ----------
@@ -397,7 +429,7 @@ export const getMe = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { data, error } = await supabaseAdmin
       .from("users")
-      .select("id, specific_id, staff_code, full_name, email, role, student_account_type")
+      .select("id, specific_id, staff_code, full_name, email, role, student_account_type, avatar_url")
       .eq("id", context.userId)
       .maybeSingle();
     if (error) throw new Error(error.message);
@@ -425,6 +457,7 @@ export const getMe = createServerFn({ method: "GET" })
       email: data?.email ?? claimEmail,
       role: normalizeRole(data?.role ?? claimRole ?? "student"),
       student_account_type: data?.student_account_type ?? null,
+      avatar_url: data?.avatar_url ?? null,
     };
   });
 
@@ -2863,9 +2896,19 @@ export const createCareUser = createServerFn({ method: "POST" })
         birthDate: z.string().optional(),
         birthYear: z.number().int().min(1900).max(new Date().getFullYear()).optional(),
         status: z.enum(["active", "disabled"]).default("active"),
+        accountImage: z
+          .object({
+            fileName: z.string().min(1).max(255),
+            contentType: z.string().min(1).max(120),
+            base64: z.string().min(1),
+          })
+          .optional(),
       }).superRefine((value, ctx) => {
         if (value.role === "student" && !value.studentAccountType) {
           ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["studentAccountType"], message: "Student account type is required for students" });
+        }
+        if (value.accountImage && !value.accountImage.contentType.startsWith("image/")) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["accountImage"], message: "Account image must be an image file" });
         }
       })
       .parse(d),
@@ -2890,6 +2933,38 @@ export const createCareUser = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     if (!authResult?.user) throw new Error("Unable to create user account");
 
+    let avatarUrl: string | null = null;
+    if (data.accountImage) {
+      try {
+        avatarUrl = await uploadAccountImage({
+          userId: authResult.user.id,
+          fileName: data.accountImage.fileName,
+          contentType: data.accountImage.contentType,
+          base64: data.accountImage.base64,
+        });
+      } catch (e) {
+        try {
+          await supabaseAdmin.auth.admin.deleteUser(authResult.user.id);
+        } catch (deleteErr) {
+          console.warn("Failed to clean up auth user after avatar upload failure:", (deleteErr as any)?.message ?? deleteErr);
+        }
+        throw e;
+      }
+
+      try {
+        await supabaseAdmin.auth.admin.updateUserById(authResult.user.id, {
+          user_metadata: {
+            full_name: data.fullName,
+            role: data.role,
+            avatar_url: avatarUrl,
+            ...(data.studentAccountType ? { student_account_type: data.studentAccountType } : {}),
+          },
+        });
+      } catch (e) {
+        console.warn("Failed to update auth metadata avatar_url:", (e as any)?.message ?? e);
+      }
+    }
+
     const updatePayload: Record<string, unknown> = {
       id: authResult.user.id,
       full_name: data.fullName,
@@ -2897,6 +2972,7 @@ export const createCareUser = createServerFn({ method: "POST" })
       status: data.status,
       role: data.role,
       student_account_type: data.role === "student" ? data.studentAccountType : null,
+      avatar_url: avatarUrl,
       // set staff_code either from caller or generated by DB RPC for safety
       staff_code: undefined,
     };
@@ -2965,7 +3041,7 @@ export const createCareUser = createServerFn({ method: "POST" })
       const { data: adminProfile } = await supabaseAdmin.from("users").select("specific_id").eq("id", context.userId).maybeSingle();
       await supabaseAdmin.from("audit_logs").insert({
         action: "create_user",
-        details: { new_user_id: userRow?.id ?? authResult.user.id, email: data.email, role: data.role },
+        details: { new_user_id: userRow?.id ?? authResult.user.id, email: data.email, role: data.role, has_avatar: Boolean(avatarUrl) },
         user_id: context.userId,
         user_specific_id: adminProfile?.specific_id ?? null,
       });
@@ -3005,7 +3081,7 @@ export const getAllUsersAdmin = createServerFn({ method: "GET" })
     // Use service client to bypass RLS and return all public.users rows
     const { data, error } = await supabaseAdmin
       .from("users")
-      .select("id, specific_id, staff_code, full_name, email, role, status, phone, birth_year, student_account_type, created_at, updated_at")
+      .select("id, specific_id, staff_code, full_name, email, role, status, phone, birth_year, student_account_type, avatar_url, created_at, updated_at")
       .order("created_at", { ascending: false })
       .limit(1000);
     if (error) throw new Error(error.message);
@@ -3026,23 +3102,48 @@ export const updateUserAdmin = createServerFn({ method: "POST" })
         birthYear: z.number().int().optional(),
         studentAccountType: z.enum(["online", "offline"]).nullable().optional(),
         password: z.string().min(6).optional(),
+        accountImage: z
+          .object({
+            fileName: z.string().min(1).max(255),
+            contentType: z.string().min(1).max(120),
+            base64: z.string().min(1),
+          })
+          .optional(),
+      })
+      .superRefine((value, ctx) => {
+        if (value.accountImage && !value.accountImage.contentType.startsWith("image/")) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["accountImage"], message: "Account image must be an image file" });
+        }
       })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { id, fullName, role, status, phone, birthDate, birthYear, password, studentAccountType } = data;
+    const { id, fullName, role, status, phone, birthDate, birthYear, password, studentAccountType, accountImage } = data;
+
+    await assertAdminContext(context);
+
+    let avatarUrl: string | null = null;
+    if (accountImage) {
+      avatarUrl = await uploadAccountImage({
+        userId: id,
+        fileName: accountImage.fileName,
+        contentType: accountImage.contentType,
+        base64: accountImage.base64,
+      });
+    }
 
     // Update auth metadata and/or password via service client when available
     try {
-      if (password || fullName || role) {
+      if (password || fullName || role || avatarUrl) {
         const adminApi = (supabaseAdmin as any)?.auth?.admin;
         if (adminApi && typeof adminApi.updateUserById === "function") {
           const updatePayload: any = {};
           if (password) updatePayload.password = password;
-          if (fullName || role)
+          if (fullName || role || avatarUrl)
             updatePayload.user_metadata = {
               ...(fullName ? { full_name: fullName } : {}),
               ...(role ? { role } : {}),
+              ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
               ...(studentAccountType !== undefined ? { student_account_type: studentAccountType } : {}),
             };
           // call updateUserById on service client
@@ -3051,10 +3152,11 @@ export const updateUserAdmin = createServerFn({ method: "POST" })
           // fallback name
           const updatePayload: any = {};
           if (password) updatePayload.password = password;
-          if (fullName || role)
+          if (fullName || role || avatarUrl)
             updatePayload.user_metadata = {
               ...(fullName ? { full_name: fullName } : {}),
               ...(role ? { role } : {}),
+              ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
               ...(studentAccountType !== undefined ? { student_account_type: studentAccountType } : {}),
             };
           await adminApi.updateUser(id, updatePayload as any);
@@ -3079,14 +3181,14 @@ export const updateUserAdmin = createServerFn({ method: "POST" })
     if (birthDate !== undefined) updatePayload.birth_year = birthDate;
     else if (birthYear !== undefined) updatePayload.birth_year = birthYear;
     if (studentAccountType !== undefined) updatePayload.student_account_type = studentAccountType;
+    if (avatarUrl) updatePayload.avatar_url = avatarUrl;
     else if ((role ?? currentUser?.role) === "student" && currentUser?.student_account_type != null && !("student_account_type" in updatePayload)) {
       updatePayload.student_account_type = currentUser.student_account_type;
     }
 
     if (Object.keys(updatePayload).length === 0) return { ok: true };
 
-    // Verify caller is admin via service client and then use service client to update public.users
-    await assertAdminContext(context);
+    // Use service client to update public.users after admin verification above.
 
     // Try update; if column is DATE and birth_year is integer, retry using a YYYY-01-01 string
     let row: any = null;

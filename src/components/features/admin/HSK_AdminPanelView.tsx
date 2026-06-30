@@ -1,17 +1,28 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { assignStudentToOfflineClass, createCareUser, getAuditLogs, getTeacherAnalytics, getAllUsersAdmin, updateUserAdmin, deleteUserAdmin, getAllClassesAdmin, createClassAdmin, updateClassAdmin, deleteClassAdmin, getClassDetailsAdmin, getClassEnrollmentsAdmin, getStudentEnrollmentsAdmin, getStudentSuggestionsAdmin, removeStudentFromClassAdmin, getClassEventsAdmin, listHskLessonsAdmin, createHskLessonAdmin, updateHskLessonAdmin, deleteHskLessonAdmin, uploadHskLessonMaterialAdmin, removeHskLessonMaterialAdmin, listClassSessionsForMaterialMapAdmin, upsertClassSessionMaterialMapAdmin, getClassSessionMaterialMapStatsAdmin } from "@/lib/hsk.functions";
 import { AdminAuditLogsPanel, AdminMappingPanel, AdminTeacherAnalyticsPanel, AdminUserManagementPanel, AdminClassesPanel, AdminLessonPrepPanel, AdminSessionMaterialMappingPanel } from "./HSK_AdminPanelUi";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, Image as ImageIcon, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { HSK_Theme } from "@/theme/hsk-config-theme";
 import { USER_STATUS_LABELS } from "@/lib/hsk-status-labels";
+
+const toBase64Raw = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result ?? "");
+      resolve(result.includes(",") ? result.split(",")[1] : result);
+    };
+    reader.onerror = () => reject(new Error(`Không thể đọc file: ${file.name}`));
+    reader.readAsDataURL(file);
+  });
 
 export function HSK_AdminPanelView() {
   const qc = useQueryClient();
@@ -46,8 +57,18 @@ export function HSK_AdminPanelView() {
   const [phone, setPhone] = useState("");
   const [birthDate, setBirthDate] = useState("");
   const [status, setStatus] = useState<"active" | "disabled">("active");
+  const [accountImageFile, setAccountImageFile] = useState<File | null>(null);
+  const [accountImagePreview, setAccountImagePreview] = useState("");
+  const [accountImageError, setAccountImageError] = useState("");
+  const [isPreparingAccountImage, setIsPreparingAccountImage] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [hasTriedCreateSubmit, setHasTriedCreateSubmit] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      if (accountImagePreview.startsWith("blob:")) URL.revokeObjectURL(accountImagePreview);
+    };
+  }, [accountImagePreview]);
 
   const createUserFn = useServerFn(createCareUser);
   const getAllUsersFn = useServerFn(getAllUsersAdmin);
@@ -132,6 +153,11 @@ export function HSK_AdminPanelView() {
       birthYear?: number;
       status: "active" | "disabled";
       staff_code?: string;
+      accountImage?: {
+        fileName: string;
+        contentType: string;
+        base64: string;
+      };
     }) => createUserFn({ data: payload }),
     onSuccess: () => {
       setFullName("");
@@ -142,6 +168,9 @@ export function HSK_AdminPanelView() {
       setPhone("");
       setBirthDate("");
       setStatus("active");
+      setAccountImageFile(null);
+      setAccountImagePreview("");
+      setAccountImageError("");
       setHasTriedCreateSubmit(false);
       qc.invalidateQueries({ queryKey: ["admin-users"] });
       qc.invalidateQueries({ queryKey: ["audit"] });
@@ -162,9 +191,52 @@ export function HSK_AdminPanelView() {
 
   const showValidationError = hasTriedCreateSubmit && !isCreateFormValid;
 
-  const handleCreateUser = () => {
+  const handleAccountImageChange = (file: File | null) => {
+    setAccountImageError("");
+    setAccountImageFile(null);
+    setAccountImagePreview("");
+
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setAccountImageError("Vui lòng chọn đúng file hình ảnh.");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setAccountImageError("Ảnh tài khoản không được vượt quá 2MB.");
+      return;
+    }
+
+    setAccountImageFile(file);
+    setAccountImagePreview(URL.createObjectURL(file));
+  };
+
+  const handleCreateUser = async () => {
     setHasTriedCreateSubmit(true);
     if (!isCreateFormValid) return;
+
+    let accountImage:
+      | {
+          fileName: string;
+          contentType: string;
+          base64: string;
+        }
+      | undefined;
+
+    if (accountImageFile) {
+      try {
+        setIsPreparingAccountImage(true);
+        accountImage = {
+          fileName: accountImageFile.name,
+          contentType: accountImageFile.type || "image/jpeg",
+          base64: await toBase64Raw(accountImageFile),
+        };
+      } catch (e: any) {
+        setAccountImageError(e?.message ?? "Không thể đọc ảnh tài khoản.");
+        return;
+      } finally {
+        setIsPreparingAccountImage(false);
+      }
+    }
 
     createUserMutation.mutate({
       fullName,
@@ -177,6 +249,7 @@ export function HSK_AdminPanelView() {
       birthYear: Number.isNaN(birthYearNumber) ? undefined : birthYearNumber,
       status,
       staff_code: nextStaffCodeForRole(role),
+      accountImage,
     });
   };
 
@@ -427,12 +500,42 @@ export function HSK_AdminPanelView() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-1.5 lg:col-span-2">
+                <Label>Ảnh tài khoản</Label>
+                <div className="flex flex-col gap-3 rounded-lg border border-dashed border-border p-3 sm:flex-row sm:items-center">
+                  <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-muted">
+                    {accountImagePreview ? (
+                      <img src={accountImagePreview} alt="Ảnh tài khoản" className="h-full w-full object-cover" />
+                    ) : (
+                      <ImageIcon className="h-7 w-7 text-muted-foreground" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <Input
+                      name="admin-create-account-image"
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleAccountImageChange(e.target.files?.[0] ?? null)}
+                    />
+                    <p className="text-xs text-muted-foreground">Chọn ảnh JPG, PNG hoặc WebP, tối đa 2MB.</p>
+                    {accountImageFile && (
+                      <div className="flex items-center gap-2 text-sm">
+                        <span className="truncate">{accountImageFile.name}</span>
+                        <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleAccountImageChange(null)}>
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    )}
+                    {accountImageError && <p className="text-sm text-destructive">{accountImageError}</p>}
+                  </div>
+                </div>
+              </div>
             </div>
             <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <Button
                 type="button"
                 onClick={handleCreateUser}
-                disabled={createUserMutation.isPending || !isCreateFormValid}
+                disabled={createUserMutation.isPending || isPreparingAccountImage || !isCreateFormValid}
               >
                 Tạo tài khoản mới
               </Button>

@@ -10,7 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Star, MoreHorizontal, Pencil, Trash2, Eye, EyeOff, ChevronDown, Plus, Minus, Download } from "lucide-react";
+import { Star, MoreHorizontal, Pencil, Trash2, Eye, EyeOff, ChevronDown, Plus, Minus, Download, Image as ImageIcon, X } from "lucide-react";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -1352,6 +1352,7 @@ export function AdminUserManagementPanel({
     email: true,
     role: true,
     student_account_type: true,
+    avatar_url: true,
     status: true,
     phone: true,
     birth_year: true,
@@ -1392,6 +1393,16 @@ export function AdminUserManagementPanel({
   const [editPassword, setEditPassword] = useState("");
   const [showEditPassword, setShowEditPassword] = useState(false);
   const [editBirthDate, setEditBirthDate] = useState<any>("");
+  const [editAvatarFile, setEditAvatarFile] = useState<File | null>(null);
+  const [editAvatarPreview, setEditAvatarPreview] = useState("");
+  const [editAvatarError, setEditAvatarError] = useState("");
+  const [isPreparingEditAvatar, setIsPreparingEditAvatar] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      if (editAvatarPreview.startsWith("blob:")) URL.revokeObjectURL(editAvatarPreview);
+    };
+  }, [editAvatarPreview]);
 
   const openEdit = (user: any) => {
     setEditingUser(user);
@@ -1401,6 +1412,9 @@ export function AdminUserManagementPanel({
     setEditStatus(user.status || "active");
     setEditPhone(user.phone || "");
     setEditPassword("");
+    setEditAvatarFile(null);
+    setEditAvatarPreview(user.avatar_url || "");
+    setEditAvatarError("");
     if (user && user.birth_year) {
       setEditBirthDate(typeof user.birth_year === 'string' ? user.birth_year : `${user.birth_year}-01-01`);
     } else {
@@ -1409,7 +1423,26 @@ export function AdminUserManagementPanel({
     setShowEditPassword(false);
   };
 
-  const handleUpdate = () => {
+  const handleEditAvatarChange = (file: File | null) => {
+    setEditAvatarError("");
+    setEditAvatarFile(null);
+    setEditAvatarPreview(editingUser?.avatar_url || "");
+
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setEditAvatarError("Vui long chon dung file hinh anh.");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setEditAvatarError("Anh tai khoan khong duoc vuot qua 2MB.");
+      return;
+    }
+
+    setEditAvatarFile(file);
+    setEditAvatarPreview(URL.createObjectURL(file));
+  };
+
+  const handleUpdate = async () => {
     if (!editingUser) return;
     const payload: any = { id: editingUser.id };
     if (editFullName !== editingUser.full_name) payload.fullName = editFullName;
@@ -1428,13 +1461,29 @@ export function AdminUserManagementPanel({
       }
     }
 
+    if (editAvatarFile) {
+      try {
+        setIsPreparingEditAvatar(true);
+        payload.accountImage = {
+          fileName: editAvatarFile.name,
+          contentType: editAvatarFile.type || "image/jpeg",
+          base64: await toBase64Raw(editAvatarFile),
+        };
+      } catch (e: any) {
+        setEditAvatarError(e?.message ?? "Khong the doc anh tai khoan.");
+        return;
+      } finally {
+        setIsPreparingEditAvatar(false);
+      }
+    }
+
     onUpdateUser(payload);
     setEditingUser(null);
   };
 
   // export displayed users as CSV
   const exportCsv = () => {
-    const cols = ['specific_id','staff_code','full_name','email','role','student_account_type','status','phone','birth_year','created_at','updated_at'];
+    const cols = ['specific_id','staff_code','full_name','email','role','student_account_type','avatar_url','status','phone','birth_year','created_at','updated_at'];
     const rows = displayedUsers.map((u: any) => cols.map((c) => (c === 'birth_year' ? csvEscape(formatBirthDateCell(u.birth_year)) : csvEscape(u[c] ?? ''))).join(','));
     const header = cols.map((c) => csvEscape(c)).join(',');
     const csv = [header, ...rows].join('\n');
@@ -1466,6 +1515,7 @@ export function AdminUserManagementPanel({
                       { key: 'email', label: 'Email' },
                       { key: 'role', label: 'Vai trò' },
                       { key: 'student_account_type', label: 'Loại học viên' },
+                      { key: 'avatar_url', label: 'Anh' },
                       { key: 'status', label: 'Trạng thái' },
                       { key: 'phone', label: 'Số điện thoại' },
                       { key: 'birth_year', label: 'Năm sinh' },
@@ -1490,7 +1540,7 @@ export function AdminUserManagementPanel({
         </div>
         <div className="overflow-x-auto">
           {(() => {
-            const colOrder = ['staff_code','specific_id','full_name','email','role','student_account_type','status','phone','birth_year','created_at','updated_at'];
+            const colOrder = ['staff_code','specific_id','full_name','email','role','student_account_type','avatar_url','status','phone','birth_year','created_at','updated_at'];
             const labels: Record<string,string> = {
               staff_code: 'Mã nhân viên',
               specific_id: 'Specific ID',
@@ -1498,6 +1548,7 @@ export function AdminUserManagementPanel({
               email: 'Email',
               role: 'Vai trò',
               student_account_type: 'Loại học viên',
+              avatar_url: 'Anh',
               status: 'Trạng thái',
               phone: 'Số điện thoại',
               birth_year: 'Năm sinh',
@@ -1548,6 +1599,17 @@ export function AdminUserManagementPanel({
                           if (k === 'email') return <TableCell key={k}>{u.email}</TableCell>;
                           if (k === 'role') return <TableCell key={k} className="capitalize">{u.role}</TableCell>;
                           if (k === 'student_account_type') return <TableCell key={k} className="capitalize">{u.student_account_type ?? '—'}</TableCell>;
+                          if (k === 'avatar_url') return (
+                            <TableCell key={k}>
+                              {u.avatar_url ? (
+                                <img src={u.avatar_url} alt={u.full_name ?? "Anh tai khoan"} className="h-10 w-10 rounded-md object-cover" />
+                              ) : (
+                                <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted">
+                                  <ImageIcon className="h-4 w-4 text-muted-foreground" />
+                                </div>
+                              )}
+                            </TableCell>
+                          );
                           if (k === 'status') return (
                             <TableCell key={k}>
                               <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${u.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-destructive/10 text-destructive'}`}>
@@ -1672,6 +1734,31 @@ export function AdminUserManagementPanel({
               <Label>Ngày sinh</Label>
               <Input type="date" value={editBirthDate} onChange={(e) => setEditBirthDate(e.target.value)} />
             </div>
+            <div className="space-y-1.5">
+              <Label>Anh tai khoan</Label>
+              <div className="flex flex-col gap-3 rounded-lg border border-dashed border-border p-3 sm:flex-row sm:items-center">
+                <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-muted">
+                  {editAvatarPreview ? (
+                    <img src={editAvatarPreview} alt="Anh tai khoan" className="h-full w-full object-cover" />
+                  ) : (
+                    <ImageIcon className="h-7 w-7 text-muted-foreground" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1 space-y-2">
+                  <Input type="file" accept="image/*" onChange={(e) => handleEditAvatarChange(e.target.files?.[0] ?? null)} />
+                  <p className="text-xs text-muted-foreground">Chon anh moi JPG, PNG hoac WebP, toi da 2MB.</p>
+                  {editAvatarFile && (
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="truncate">{editAvatarFile.name}</span>
+                      <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleEditAvatarChange(null)}>
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
+                  {editAvatarError && <p className="text-sm text-destructive">{editAvatarError}</p>}
+                </div>
+              </div>
+            </div>
             <div className="space-y-1.5 relative">
               <Label>Mật khẩu mới (Bỏ trống nếu không đổi)</Label>
               <div className="relative">
@@ -1697,7 +1784,7 @@ export function AdminUserManagementPanel({
             <Button variant="outline" onClick={() => setEditingUser(null)}>
               Hủy
             </Button>
-            <Button onClick={handleUpdate} disabled={isPending}>
+            <Button onClick={handleUpdate} disabled={isPending || isPreparingEditAvatar}>
               Lưu thay đổi
             </Button>
           </DialogFooter>

@@ -6,6 +6,7 @@ export interface HSKBaseProfile {
   full_name: string;
   email: string;
   role: HSKUserRole;
+  avatar_url?: string | null;
 }
 
 export interface HSKStudentProfile extends HSKBaseProfile {
